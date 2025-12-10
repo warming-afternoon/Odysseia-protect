@@ -1,0 +1,31 @@
+# Git
+.git
+.gitignore
+
+# Docker
+Dockerfile
+.dockerignore
+
+# Python Caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual Environment
+.venv/
+venv/
+env/
+
+# IDE / Editor specific
+.vscode/
+.idea/
+
+# Test files
+tests/
+
+# Temporary files
+*.tmp
+
+# Local data
+data/
