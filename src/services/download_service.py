@@ -4,7 +4,7 @@
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import discord
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,11 +21,14 @@ class DownloadService(BaseService):
     """封装了所有与资源下载相关的业务逻辑。"""
 
     async def handle_download_request(
-        self, session: AsyncSession, *, interaction: discord.Interaction
+        self,
+        session: AsyncSession,
+        *,
+        source: Union[discord.Interaction, discord.Message],
     ) -> dict[str, Any]:
         """处理 /下载 命令的请求，返回包含 Embed 和 View 的字典。"""
-        if not interaction.channel or not isinstance(
-            interaction.channel, (discord.TextChannel, discord.Thread)
+        if not source.channel or not isinstance(
+            source.channel, (discord.TextChannel, discord.Thread)
         ):
             embed = discord.Embed(
                 title="❌ 操作无效",
@@ -35,7 +38,7 @@ class DownloadService(BaseService):
             return {"embed": embed}
 
         thread_model = await self.thread_repo.get_by_public_thread_id(
-            session, public_thread_id=interaction.channel.id
+            session, public_thread_id=source.channel.id
         )
 
         if not thread_model:
@@ -69,13 +72,13 @@ class DownloadService(BaseService):
         )
         embed.add_field(
             name="🔒 受保护资源",
-            value=format_resource_list(secure_resources, interaction=interaction),
+            value=format_resource_list(secure_resources, source=source),
             inline=False,
         )
         embed.add_field(
             name="📄 资源",
             value=format_resource_list(
-                normal_resources, is_normal_mode=True, interaction=interaction
+                normal_resources, is_normal_mode=True, source=source
             ),
             inline=False,
         )

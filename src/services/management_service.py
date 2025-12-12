@@ -104,13 +104,13 @@ class ManagementService(BaseService):
 
             embed.add_field(
                 name="🔒 受保护资源",
-                value=format_resource_list(secure_resources, interaction=interaction),
+                value=format_resource_list(secure_resources, source=interaction),
                 inline=False,
             )
             embed.add_field(
                 name="📄 资源",
                 value=format_resource_list(
-                    normal_resources, is_normal_mode=True, interaction=interaction
+                    normal_resources, is_normal_mode=True, source=interaction
                 ),
                 inline=False,
             )
