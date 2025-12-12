@@ -81,81 +81,75 @@ class ResourceSelectView(discord.ui.View):
                 )
                 return
 
-            # --- 反应墙验证 ---
-            thread = selected_resource.thread
-            if thread.reaction_required:
-                # 获取当前帖子（即 interaction.channel）
-                if not isinstance(interaction.channel, discord.Thread):
-                    # 这不应该发生，因为 /下载 命令只在帖子中可用
-                    await interaction.response.send_message(
-                        "❌ 错误：无法验证反应，因为当前频道不是帖子。", ephemeral=True
-                    )
-                    return
-                discord_thread = interaction.channel
-                # 获取起始消息
-                try:
-                    # 尝试获取起始消息
-                    starter_message = discord_thread.starter_message
-                    if starter_message is None:
-                        # 如果未缓存，则获取第一条消息
-                        async for msg in discord_thread.history(
-                            limit=1, oldest_first=True
-                        ):
-                            starter_message = msg
-                            break
-                    if starter_message is None:
-                        raise ValueError("无法找到起始消息")
-                except Exception as e:
-                    logger.error(f"获取帖子起始消息失败: {e}")
-                    await interaction.response.send_message(
-                        "❌ 无法验证您的反应，请稍后再试。", ephemeral=True
-                    )
-                    return
-
-                # 检查用户是否已做出反应
-                user_has_reacted = False
-                if thread.reaction_emoji:
-                    # 检查特定表情
-                    for reaction in starter_message.reactions:
-                        if str(reaction.emoji) == thread.reaction_emoji:
-                            # 检查该用户是否已做出反应
-                            try:
-                                users = [
-                                    user
-                                    async for user in reaction.users()
-                                    if user.id == interaction.user.id
-                                ]
-                                if users:
-                                    user_has_reacted = True
-                                    break
-                            except discord.Forbidden:
-                                pass
-                else:
-                    # 检查任何反应
-                    for reaction in starter_message.reactions:
-                        try:
-                            users = [
-                                user
-                                async for user in reaction.users()
-                                if user.id == interaction.user.id
-                            ]
-                            if users:
-                                user_has_reacted = True
-                                break
-                        except discord.Forbidden:
-                            pass
-
-                if not user_has_reacted:
-                    emoji_info = (
-                        f"表情 {thread.reaction_emoji}"
-                        if thread.reaction_emoji
-                        else "任意表情"
-                    )
-                    await interaction.response.send_message(
-                        f"❌ 您需要先对本帖的起始消息做出反应（{emoji_info}）才能下载此资源。",
-                        ephemeral=True,
-                    )
-                    return
+            # # --- 反应墙验证 ---
+            # thread = selected_resource.thread
+            # if thread.reaction_required:
+            #     # 获取当前帖子（即 interaction.channel）
+            #     if not isinstance(interaction.channel, discord.Thread):
+            #         # 这不应该发生，因为 /下载 命令只在帖子中可用
+            #         await interaction.response.send_message(
+            #             "❌ 错误：无法验证反应，因为当前频道不是帖子。", ephemeral=True
+            #         )
+            #         return
+            #     discord_thread = interaction.channel
+            #     # 获取起始消息
+            #     try:
+            #         # 强制从 API 获取最新的消息状态，避免缓存问题
+            #         # 帖子的 ID 和它的起始消息的 ID 是相同的
+            #         starter_message = await discord_thread.fetch_message(
+            #             discord_thread.id
+            #         )
+            #     except (discord.NotFound, discord.Forbidden, Exception) as e:
+            #         logger.error(f"获取帖子起始消息失败: {e}")
+            #         await interaction.response.send_message(
+            #             "❌ 无法验证您的反应，请稍后再试。", ephemeral=True
+            #         )
+            #         return
+            #
+            #     # 检查用户是否已做出反应
+            #     user_has_reacted = False
+            #     if thread.reaction_emoji:
+            #         # 检查特定表情
+            #         for reaction in starter_message.reactions:
+            #             if str(reaction.emoji) == thread.reaction_emoji:
+            #                 # 检查该用户是否已做出反应
+            #                 try:
+            #                     users = [
+            #                         user
+            #                         async for user in reaction.users()
+            #                         if user.id == interaction.user.id
+            #                     ]
+            #                     if users:
+            #                         user_has_reacted = True
+            #                         break
+            #                 except discord.Forbidden:
+            #                     pass
+            #     else:
+            #         # 检查任何反应
+            #         for reaction in starter_message.reactions:
+            #             try:
+            #                 users = [
+            #                     user
+            #                     async for user in reaction.users()
+            #                     if user.id == interaction.user.id
+            #                 ]
+            #                 if users:
+            #                     user_has_reacted = True
+            #                     break
+            #             except discord.Forbidden:
+            #                 pass
+            #
+            #     if not user_has_reacted:
+            #         emoji_info = (
+            #             f" {thread.reaction_emoji}"
+            #             if thread.reaction_emoji
+            #             else "任意表情"
+            #         )
+            #         await interaction.response.send_message(
+            #             f"❌ 您需要先对本帖的起始消息做出反应[{emoji_info}]才能下载此资源。",
+            #             ephemeral=True,
+            #         )
+            #         return
 
             # --- 核心修复：动态获取新的有效链接 ---
             fresh_url = None

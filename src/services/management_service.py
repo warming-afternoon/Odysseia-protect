@@ -65,17 +65,25 @@ class ManagementService(BaseService):
             color=discord.Color.orange(),
         )
 
-        # 添加反应墙状态字段
-        reaction_status = "已开启" if thread_model.reaction_required else "已关闭"
-        emoji_info = (
-            f"自定义表情: {thread_model.reaction_emoji}"
-            if thread_model.reaction_emoji
-            else "任意表情"
-        )
-        reaction_desc = f"用户需要先对本帖的做出反应，然后才能下载 **受保护资源**。\n**要求**: {emoji_info}"
+        # # 添加反应墙状态字段
+        # reaction_status = "已开启" if thread_model.reaction_required else "已关闭"
+        # emoji_info = (
+        #     f"自定义表情: {thread_model.reaction_emoji}"
+        #     if thread_model.reaction_emoji
+        #     else "任意表情"
+        # )
+        # reaction_desc = f"用户需要先对本帖的做出反应，然后才能下载 **受保护资源**。\n**要求**: {emoji_info}"
+        # embed.add_field(
+        #     name=f"🔒 反应墙状态: {reaction_status}",
+        #     value=reaction_desc,
+        #     inline=False,
+        # )
+
+        quick_mode_status = "已开启" if thread_model.quick_mode_enabled else "已关闭"
+        quick_mode_desc = "开启后，使用 App 命令转存的资源将 **自动删除** 原始消息。"
         embed.add_field(
-            name=f"🔒 反应墙状态: {reaction_status}",
-            value=reaction_desc,
+            name=f"⚡ 快捷模式: {quick_mode_status}",
+            value=quick_mode_desc,
             inline=False,
         )
 
@@ -96,13 +104,13 @@ class ManagementService(BaseService):
 
             embed.add_field(
                 name="🔒 受保护资源",
-                value=format_resource_list(secure_resources, interaction=interaction),
+                value=format_resource_list(secure_resources, source=interaction),
                 inline=False,
             )
             embed.add_field(
                 name="📄 资源",
                 value=format_resource_list(
-                    normal_resources, is_normal_mode=True, interaction=interaction
+                    normal_resources, is_normal_mode=True, source=interaction
                 ),
                 inline=False,
             )

@@ -42,7 +42,7 @@ class DownloadCog(commands.Cog):
         # 调用 Service 层来处理下载请求
         async with AsyncSessionLocal() as session:
             response_data = await self.bot.download_service.handle_download_request(
-                session, interaction=interaction
+                session, source=interaction
             )
 
         # 使用关键字参数解包来发送响应

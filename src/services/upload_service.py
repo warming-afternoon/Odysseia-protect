@@ -329,9 +329,13 @@ class UploadService(BaseService):
         attachments: list[discord.Attachment],
         version_info: str,
         password: Optional[str],
+        source_message: Optional[discord.Message] = None,
     ) -> str:
         """处理来自多附件上传模态框的提交。"""
         try:
+            thread_model = await self._get_or_create_thread(
+                session, interaction=interaction
+            )
             result_message = (
                 await self._handle_secure_upload_submission_from_attachments(
                     session,
@@ -339,9 +343,49 @@ class UploadService(BaseService):
                     attachments=attachments,
                     version_info=version_info,
                     password=password,
+                    thread_model=thread_model,
                 )
             )
             await session.commit()
+
+            # --- 新逻辑：快捷模式处理 ---
+            if source_message:  # 仅当从上下文菜单调用时才处理
+                if thread_model.quick_mode_enabled:
+                    try:
+                        await source_message.delete()
+                        logger.info(
+                            f"快捷模式开启：已自动删除源消息 {source_message.id}"
+                        )
+                        result_message += "\n⚡️ 快捷模式已开启，原始消息已自动删除。"
+                    except (discord.Forbidden, discord.NotFound) as e:
+                        logger.warning(
+                            f"快捷模式：删除源消息 {source_message.id} 失败: {e}"
+                        )
+                else:
+                    try:
+                        # 断言 interaction.channel 是一个帖子，以便安全地访问 .name 属性
+                        assert isinstance(interaction.channel, discord.Thread)
+                        dm_channel = await source_message.author.create_dm()
+                        embed = discord.Embed(
+                            title="📎 文件转存成功",
+                            description=(
+                                f"您在帖子 **{interaction.channel.name}** 中的消息已成功转存为受保护资源。\n\n"
+                                f"🔗 [点击跳转到原始消息]({source_message.jump_url})\n\n"
+                                "请及时手动删除该原始消息。\n"
+                                "如果您希望以后自动删除，可以在该帖子中使用 `/管理` 命令开启 **快捷模式**。"
+                            ),
+                            color=discord.Color.green(),
+                        )
+                        await dm_channel.send(embed=embed)
+                        logger.info(
+                            f"快捷模式关闭：已私信提醒用户 {source_message.author.id} 删除源消息"
+                        )
+                    except discord.Forbidden:
+                        logger.warning(
+                            f"无法私信用户 {source_message.author.id}，可能已屏蔽Bot或关闭私信"
+                        )
+            # --- 结束 ---
+
             return result_message
         except PermissionError as e:
             logger.warning(
@@ -365,25 +409,21 @@ class UploadService(BaseService):
         attachments: list[discord.Attachment],
         version_info: str,
         password: Optional[str],
+        thread_model,
     ) -> str:
         """处理多个附件的安全上传的后端逻辑。"""
         assert isinstance(interaction.channel, (discord.TextChannel, discord.Thread))
 
-        # 1. 获取或创建数据库记录
-        thread_model = await self._get_or_create_thread(
-            session, interaction=interaction
-        )
-
-        # 2. 权限检查
+        # 1. 权限检查 (thread_model 已从外部传入)
         if thread_model.author_id != interaction.user.id:
             raise PermissionError("抱歉，只有本帖的作者才能上传资源。")
 
-        # 3. 统一调用函数来查找或创建仓库帖子
+        # 2. 统一调用函数来查找或创建仓库帖子
         warehouse_thread = await self._find_or_create_warehouse_thread(
             session, interaction, thread_model
         )
 
-        # 4. 上传所有附件并创建资源记录
+        # 3. 上传所有附件并创建资源记录
         uploaded_files = []
         for attachment in attachments:
             try:

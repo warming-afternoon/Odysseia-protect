@@ -162,11 +162,15 @@ class ManagementView(discord.ui.View):
             self.add_item(self.edit_button)
             self.add_item(self.delete_button)
 
-        # 总是添加反应墙管理组件
-        self.toggle_reaction_button = self.ToggleReactionWallButton(thread)
-        self.set_reaction_emoji_button = self.SetReactionEmojiButton(thread)
-        self.add_item(self.toggle_reaction_button)
-        self.add_item(self.set_reaction_emoji_button)
+        # # 总是添加反应墙管理组件
+        # self.toggle_reaction_button = self.ToggleReactionWallButton(thread)
+        # self.set_reaction_emoji_button = self.SetReactionEmojiButton(thread)
+        # self.add_item(self.toggle_reaction_button)
+        # self.add_item(self.set_reaction_emoji_button)
+
+        # 添加快捷模式按钮
+        self.toggle_quick_mode_button = self.ToggleQuickModeButton(thread)
+        self.add_item(self.toggle_quick_mode_button)
 
     async def on_timeout(self):
         """超时后禁用所有组件。"""
@@ -253,18 +257,100 @@ class ManagementView(discord.ui.View):
                         embed=confirmation_embed, view=confirmation_view
                     )
 
-    class ToggleReactionWallButton(discord.ui.Button):
+    # class ToggleReactionWallButton(discord.ui.Button):
+    #     def __init__(self, thread: "Thread"):
+    #         # 根据当前状态设置按钮的标签和样式
+    #         is_enabled = thread.reaction_required
+    #         super().__init__(
+    #             label="关闭反应墙" if is_enabled else "开启反应墙",
+    #             style=(
+    #                 discord.ButtonStyle.danger
+    #                 if is_enabled
+    #                 else discord.ButtonStyle.success
+    #             ),
+    #             row=2,  # 放在新的一行
+    #         )
+    #
+    #     async def callback(self, interaction: discord.Interaction):
+    #         if not isinstance(self.view, ManagementView):
+    #             return
+    #
+    #         view = self.view
+    #         service = view.service
+    #         thread_to_update = view.thread
+    #         original_interaction = view.original_interaction
+    #
+    #         await interaction.response.defer()
+    #
+    #         async with AsyncSessionLocal() as session:
+    #             try:
+    #                 # 获取最新的帖子状态以防万一
+    #                 fresh_thread = await service.thread_repo.get(
+    #                     session, id=thread_to_update.id
+    #                 )
+    #                 if not fresh_thread:
+    #                     await interaction.followup.send(
+    #                         "❌ 错误：找不到帖子。", ephemeral=True
+    #                     )
+    #                     return
+    #
+    #                 # 切换状态并更新
+    #                 new_status = not fresh_thread.reaction_required
+    #                 update_data = {"reaction_required": new_status}
+    #                 await service.thread_repo.update(
+    #                     session,
+    #                     db_obj=fresh_thread,
+    #                     obj_in=update_data,
+    #                 )
+    #                 await session.commit()
+    #
+    #                 # 刷新整个管理面板
+    #                 refreshed_panel = await service.handle_management_request(
+    #                     session, interaction=original_interaction
+    #                 )
+    #                 await original_interaction.edit_original_response(**refreshed_panel)
+    #
+    #             except Exception as e:
+    #                 await session.rollback()
+    #                 logger.error(
+    #                     f"切换反应墙状态时出错，帖子ID: {thread_to_update.id}",
+    #                     exc_info=e,
+    #                 )
+    #                 await interaction.followup.send(
+    #                     "❌ 切换状态时发生内部错误。", ephemeral=True
+    #                 )
+    #
+    # class SetReactionEmojiButton(discord.ui.Button):
+    #     def __init__(self, thread: "Thread"):
+    #         # 按钮标签和样式
+    #         super().__init__(
+    #             label="设置反应",
+    #             style=discord.ButtonStyle.secondary,
+    #             row=2,  # 与切换按钮同一行
+    #             emoji="😀",
+    #         )
+    #         self.thread = thread
+    #
+    #     async def callback(self, interaction: discord.Interaction):
+    #         if not isinstance(self.view, ManagementView):
+    #             return
+    #
+    #         view = self.view
+    #         # 弹出模态框
+    #         modal = SetReactionEmojiModal(view.service, self.thread)
+    #         await interaction.response.send_modal(modal)
+
+    class ToggleQuickModeButton(discord.ui.Button):
         def __init__(self, thread: "Thread"):
-            # 根据当前状态设置按钮的标签和样式
-            is_enabled = thread.reaction_required
+            is_enabled = thread.quick_mode_enabled
             super().__init__(
-                label="关闭反应墙" if is_enabled else "开启反应墙",
+                label="关闭快捷模式" if is_enabled else "开启快捷模式",
                 style=(
                     discord.ButtonStyle.danger
                     if is_enabled
                     else discord.ButtonStyle.success
                 ),
-                row=2,  # 放在新的一行
+                row=3,
             )
 
         async def callback(self, interaction: discord.Interaction):
@@ -280,7 +366,6 @@ class ManagementView(discord.ui.View):
 
             async with AsyncSessionLocal() as session:
                 try:
-                    # 获取最新的帖子状态以防万一
                     fresh_thread = await service.thread_repo.get(
                         session, id=thread_to_update.id
                     )
@@ -290,9 +375,8 @@ class ManagementView(discord.ui.View):
                         )
                         return
 
-                    # 切换状态并更新
-                    new_status = not fresh_thread.reaction_required
-                    update_data = {"reaction_required": new_status}
+                    new_status = not fresh_thread.quick_mode_enabled
+                    update_data = {"quick_mode_enabled": new_status}
                     await service.thread_repo.update(
                         session,
                         db_obj=fresh_thread,
@@ -300,7 +384,6 @@ class ManagementView(discord.ui.View):
                     )
                     await session.commit()
 
-                    # 刷新整个管理面板
                     refreshed_panel = await service.handle_management_request(
                         session, interaction=original_interaction
                     )
@@ -309,94 +392,74 @@ class ManagementView(discord.ui.View):
                 except Exception as e:
                     await session.rollback()
                     logger.error(
-                        f"切换反应墙状态时出错，帖子ID: {thread_to_update.id}",
+                        f"切换快捷模式状态时出错，帖子ID: {thread_to_update.id}",
                         exc_info=e,
                     )
                     await interaction.followup.send(
                         "❌ 切换状态时发生内部错误。", ephemeral=True
                     )
 
-    class SetReactionEmojiButton(discord.ui.Button):
-        def __init__(self, thread: "Thread"):
-            # 按钮标签和样式
-            super().__init__(
-                label="设置反应",
-                style=discord.ButtonStyle.secondary,
-                row=2,  # 与切换按钮同一行
-                emoji="😀",
-            )
-            self.thread = thread
 
-        async def callback(self, interaction: discord.Interaction):
-            if not isinstance(self.view, ManagementView):
-                return
-
-            view = self.view
-            # 弹出模态框
-            modal = SetReactionEmojiModal(view.service, self.thread)
-            await interaction.response.send_modal(modal)
-
-
-class SetReactionEmojiModal(discord.ui.Modal, title="设置反应表情"):
-    """用于设置自定义反应表情的模态框。"""
-
-    def __init__(self, service: "ManagementService", thread: "Thread"):
-        super().__init__()
-        self.service = service
-        self.thread = thread
-
-        self.emoji_input = discord.ui.TextInput(
-            label="反应表情",
-            placeholder="输入一个emoji，例如: 👍, 🔥, 🎉 (留空则清除)",
-            default=thread.reaction_emoji or "",
-            style=discord.TextStyle.short,
-            required=False,
-            max_length=50,
-        )
-        self.add_item(self.emoji_input)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        emoji = self.emoji_input.value.strip()
-        # 验证：如果非空，确保是单个有效的emoji（简单检查）
-        if emoji and len(emoji) > 10:  # 粗略检查，实际可以更严格
-            await interaction.followup.send(
-                "❌ 请输入一个有效的emoji（长度不超过10个字符）。", ephemeral=True
-            )
-            return
-
-        async with AsyncSessionLocal() as session:
-            try:
-                # 获取最新的帖子状态
-                fresh_thread = await self.service.thread_repo.get(
-                    session, id=self.thread.id
-                )
-                if not fresh_thread:
-                    await interaction.followup.send(
-                        "❌ 错误：找不到帖子。", ephemeral=True
-                    )
-                    return
-
-                update_data = {"reaction_emoji": emoji if emoji else None}
-                await self.service.thread_repo.update(
-                    session,
-                    db_obj=fresh_thread,
-                    obj_in=update_data,
-                )
-                await session.commit()
-
-                # 刷新整个管理面板
-                refreshed_panel = await self.service.handle_management_request(
-                    session, interaction=interaction
-                )
-                await interaction.edit_original_response(**refreshed_panel)
-
-            except Exception as e:
-                await session.rollback()
-                logger.error(
-                    f"设置反应表情时出错，帖子ID: {self.thread.id}",
-                    exc_info=e,
-                )
-                await interaction.followup.send(
-                    "❌ 设置反应表情时发生内部错误。", ephemeral=True
-                )
+# class SetReactionEmojiModal(discord.ui.Modal, title="设置反应表情"):
+#     """用于设置自定义反应表情的模态框。"""
+#
+#     def __init__(self, service: "ManagementService", thread: "Thread"):
+#         super().__init__()
+#         self.service = service
+#         self.thread = thread
+#
+#         self.emoji_input = discord.ui.TextInput(
+#             label="反应表情",
+#             placeholder="输入一个emoji，例如: 👍, 🔥, 🎉 (留空则清除)",
+#             default=thread.reaction_emoji or "",
+#             style=discord.TextStyle.short,
+#             required=False,
+#             max_length=50,
+#         )
+#         self.add_item(self.emoji_input)
+#
+#     async def on_submit(self, interaction: discord.Interaction):
+#         await interaction.response.defer(ephemeral=True)
+#         emoji = self.emoji_input.value.strip()
+#         # 验证：如果非空，确保是单个有效的emoji（简单检查）
+#         if emoji and len(emoji) > 10:  # 粗略检查，实际可以更严格
+#             await interaction.followup.send(
+#                 "❌ 请输入一个有效的emoji（长度不超过10个字符）。", ephemeral=True
+#             )
+#             return
+#
+#         async with AsyncSessionLocal() as session:
+#             try:
+#                 # 获取最新的帖子状态
+#                 fresh_thread = await self.service.thread_repo.get(
+#                     session, id=self.thread.id
+#                 )
+#                 if not fresh_thread:
+#                     await interaction.followup.send(
+#                         "❌ 错误：找不到帖子。", ephemeral=True
+#                     )
+#                     return
+#
+#                 update_data = {"reaction_emoji": emoji if emoji else None}
+#                 await self.service.thread_repo.update(
+#                     session,
+#                     db_obj=fresh_thread,
+#                     obj_in=update_data,
+#                 )
+#                 await session.commit()
+#
+#                 # 刷新整个管理面板
+#                 refreshed_panel = await self.service.handle_management_request(
+#                     session, interaction=interaction
+#                 )
+#                 await interaction.edit_original_response(**refreshed_panel)
+#
+#             except Exception as e:
+#                 await session.rollback()
+#                 logger.error(
+#                     f"设置反应表情时出错，帖子ID: {self.thread.id}",
+#                     exc_info=e,
+#                 )
+#                 await interaction.followup.send(
+#                     "❌ 设置反应表情时发生内部错误。", ephemeral=True
+#                 )

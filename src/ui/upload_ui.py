@@ -171,6 +171,7 @@ class SecureUploadModal(discord.ui.Modal, title="上传受保护文件 - 填写�
                         attachments=self.files,
                         version_info=self.version_info_input.value,
                         password=self.password_input.value or None,
+                        source_message=self.source_message,
                     )
                 )
             else:
@@ -184,11 +185,3 @@ class SecureUploadModal(discord.ui.Modal, title="上传受保护文件 - 填写�
                     password=self.password_input.value or None,
                 )
         await interaction.edit_original_response(content=result_message)
-        # 如果上传成功且源消息存在，则删除源消息
-        if self.source_message and result_message.startswith("✅"):
-            try:
-                await self.source_message.delete()
-            except discord.HTTPException as e:
-                logger.warning(
-                    f"删除上下文菜单的源消息 {self.source_message.id} 失败: {e}"
-                )

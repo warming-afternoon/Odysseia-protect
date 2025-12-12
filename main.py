@@ -21,7 +21,7 @@ from src.database.repositories.user import UserRepository
 from src.services.upload_service import UploadService
 from src.services.download_service import DownloadService
 from src.services.management_service import ManagementService
-from src.services.reaction_wall_service import ReactionWallService
+# from src.services.reaction_wall_service import ReactionWallService
 
 
 # --- 可选的 uvloop 性能加速 ---
@@ -71,9 +71,10 @@ class OdysseiaProtect(commands.Bot):
         self.management_service = ManagementService(
             self, resource_repo, thread_repo, user_repo
         )
-        self.reaction_wall_service = ReactionWallService(
-            self, resource_repo, thread_repo, user_repo
-        )
+
+    #       self.reaction_wall_service = ReactionWallService(
+    #           self, resource_repo, thread_repo, user_repo
+    #       )
 
     async def setup_hook(self):
         """在 Bot 登录后执行异步初始化。"""
