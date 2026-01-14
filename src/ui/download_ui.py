@@ -21,15 +21,13 @@ class ResourceSelectView(discord.ui.View):
     """
 
     def __init__(self, resources: Sequence[Resource]):
-        # timeout=None 让视图永久有效，不会在几分钟后禁用
         super().__init__(timeout=None)
 
-        # 将 Resource 对象列表添加到下拉菜单中
         self.add_item(self.ResourceSelect(resources))
 
     class ResourceSelect(discord.ui.Select):
         """
-        继承自 discord.ui.Select 的自定义下拉菜单。
+        资源选择下拉菜单。
         """
 
         def __init__(self, resources: Sequence[Resource]):
@@ -37,11 +35,21 @@ class ResourceSelectView(discord.ui.View):
             # Discord 的下拉菜单最多只能有 25 个选项
             for resource in resources[:25]:
                 mode_icon = "🔒" if resource.upload_mode == UploadMode.SECURE else "📄"
+                
+                # 构建 label 和 description，确保不超过 Discord 的 100 字符限制
+                label_text = f"{mode_icon} 版本: {resource.version_info or '未命名'}"
+                if len(label_text) > 100:
+                    label_text = label_text[:90] + "..."
+                
+                desc_text = f"文件名: {resource.filename or 'N/A'}"
+                if len(desc_text) > 100:
+                    desc_text = desc_text[:90] + "..."
+                
                 # 为每个资源创建一个选项
                 option = discord.SelectOption(
-                    label=f"{mode_icon} 版本: {resource.version_info or '未命名'}",
-                    description=f"文件名: {resource.filename or 'N/A'}",
-                    value=str(resource.id),  # 将数据库主键ID作为值，方便回调时查找
+                    label=label_text,
+                    description=desc_text,
+                    value=str(resource.id),
                 )
                 options.append(option)
 
@@ -151,7 +159,7 @@ class ResourceSelectView(discord.ui.View):
             #         )
             #         return
 
-            # --- 核心修复：动态获取新的有效链接 ---
+            # 动态获取新的有效链接
             fresh_url = None
             try:
                 # 断言 bot 实例存在
@@ -186,9 +194,8 @@ class ResourceSelectView(discord.ui.View):
                     ephemeral=True,
                 )
                 return
-            # --- 链接获取结束 ---
 
-            # --- 下载计数 ---
+            # 下载计数
             try:
                 selected_resource.download_count += 1
                 session.add(selected_resource)
@@ -201,11 +208,9 @@ class ResourceSelectView(discord.ui.View):
                 logger.error(
                     f"为资源 {selected_resource.id} 增加下载计数失败", exc_info=e
                 )
-            # --- 下载计数结束 ---
 
             if selected_resource.password:
                 modal = PasswordModal(resource=selected_resource, fresh_url=fresh_url)
-                # 修复：直接响应模态框，这是此代码路径的第一次也是唯一一次响应。
                 await interaction.response.send_modal(modal)
 
             else:
@@ -214,7 +219,6 @@ class ResourceSelectView(discord.ui.View):
                     description=f"您选择的资源下载链接如下请尽快下载：\n\n[点击这里下载]({fresh_url})",
                     color=discord.Color.green(),
                 )
-                # 修复：直接发送消息作为响应。
                 await interaction.response.send_message(
                     embed=response_embed, ephemeral=True
                 )

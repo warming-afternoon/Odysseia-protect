@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.database.models import UploadMode
 from src.services.base import BaseService
 from src.ui.download_ui import ResourceSelectView
-from src.utils.formatting import format_resource_list
+from src.utils.formatting import format_resource_list_chunks
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ class DownloadService(BaseService):
             )
             return {"embed": embed}
 
-        # --- 新逻辑：按模式分组资源 ---
+        # 按模式分组资源
         secure_resources = [r for r in resources if r.upload_mode == UploadMode.SECURE]
         normal_resources = [r for r in resources if r.upload_mode == UploadMode.NORMAL]
 
@@ -70,22 +70,19 @@ class DownloadService(BaseService):
             description="资源已按模式分类。请从下面的下拉菜单中选择一项进行下载。",
             color=discord.Color.green(),
         )
-        embed.add_field(
-            name="🔒 受保护资源",
-            value=format_resource_list(
-                secure_resources, source=source, show_download_count=False
-            ),
-            inline=False,
-        )
-        embed.add_field(
-            name="📄 资源",
-            value=format_resource_list(
-                normal_resources, is_normal_mode=True, source=source
-            ),
-            inline=False,
-        )
+        # 按分页块添加受保护资源
+        secure_chunks = format_resource_list_chunks(secure_resources, source=source, show_download_count=False)
+        for i, chunk in enumerate(secure_chunks):
+            name = "🔒 受保护资源" if i == 0 else "🔒 受保护资源 (续)"
+            embed.add_field(name=name, value=chunk, inline=False)
 
-        # 关键修改：只将受保护的资源传递给下拉菜单视图
+        # 按分页块添加普通资源
+        normal_chunks = format_resource_list_chunks(normal_resources, is_normal_mode=True, source=source)
+        for i, chunk in enumerate(normal_chunks):
+            name = "📄 资源" if i == 0 else "📄 资源 (续)"
+            embed.add_field(name=name, value=chunk, inline=False)
+
+        # 只将受保护的资源传递给下拉菜单视图
         view = ResourceSelectView(secure_resources)
         return {"embed": embed, "view": view}
 

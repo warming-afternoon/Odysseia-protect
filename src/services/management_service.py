@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.database.models import Resource, UploadMode
 from src.services.base import BaseService
 from src.ui.management_ui import ManagementView
-from src.utils.formatting import format_resource_list
+from src.utils.formatting import format_resource_list_chunks
 
 logger = logging.getLogger(__name__)
 
@@ -102,18 +102,17 @@ class ManagementService(BaseService):
                 r for r in resources if r.upload_mode == UploadMode.NORMAL
             ]
 
-            embed.add_field(
-                name="🔒 受保护资源",
-                value=format_resource_list(secure_resources, source=interaction),
-                inline=False,
-            )
-            embed.add_field(
-                name="📄 资源",
-                value=format_resource_list(
-                    normal_resources, is_normal_mode=True, source=interaction
-                ),
-                inline=False,
-            )
+            # 处理受保护资源的分页显示
+            secure_chunks = format_resource_list_chunks(secure_resources, source=interaction)
+            for i, chunk in enumerate(secure_chunks):
+                name = "🔒 受保护资源" if i == 0 else "🔒 受保护资源 (续)"
+                embed.add_field(name=name, value=chunk, inline=False)
+
+            # 处理普通资源的分页显示
+            normal_chunks = format_resource_list_chunks(normal_resources, is_normal_mode=True, source=interaction)
+            for i, chunk in enumerate(normal_chunks):
+                name = "📄 资源" if i == 0 else "📄 资源 (续)"
+                embed.add_field(name=name, value=chunk, inline=False)
 
         view = ManagementView(resources, self, interaction, thread_model)
         return {"embed": embed, "view": view}

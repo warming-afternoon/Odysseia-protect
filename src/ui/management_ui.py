@@ -55,7 +55,6 @@ class ManagementModal(discord.ui.Modal, title="编辑资源信息"):
                     password=self.password_input.value or None,
                 )
                 if updated:
-                    # 关键修复：提交数据库事务以保存更改
                     await session.commit()
                     await interaction.followup.send(
                         "✅ 资源信息已成功更新！", ephemeral=True
@@ -187,10 +186,20 @@ class ManagementView(discord.ui.View):
             options = []
             for r in resources[:25]:
                 mode_icon = "🔒" if r.upload_mode == UploadMode.SECURE else "📄"
+                
+                # 构建 label 和 description，确保不超过 Discord 的 100 字符限制
+                label_text = f"{mode_icon} 版本: {r.version_info or '未命名'}"
+                if len(label_text) > 100:
+                    label_text = label_text[:90] + "..."
+                
+                desc_text = f"文件名: {r.filename or 'N/A'}"
+                if len(desc_text) > 100:
+                    desc_text = desc_text[:90] + "..."
+                
                 options.append(
                     discord.SelectOption(
-                        label=f"{mode_icon} 版本: {r.version_info or '未命名'}",
-                        description=f"文件名: {r.filename or 'N/A'}",
+                        label=label_text,
+                        description=desc_text,
                         value=str(r.id),
                     )
                 )
