@@ -3,7 +3,6 @@
 这个 Cog 模块负责处理所有与文件“上传”相关的命令和交互。
 """
 
-# --- 导入必要的库 ---
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -17,11 +16,6 @@ if TYPE_CHECKING:
     from main import OdysseiaProtect
 
 logger = logging.getLogger(__name__)
-
-# ===================================================================================
-# 定义 UploadCog 类
-# ===================================================================================
-
 
 class UploadCog(commands.Cog):
     """

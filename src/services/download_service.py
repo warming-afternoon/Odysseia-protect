@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database.models import UploadMode
 from src.services.base import BaseService
-from src.ui.download_ui import ResourceSelectView
+from src.ui.resource_select_view import ResourceSelectView
 from src.utils.formatting import format_resource_list_chunks
 
 logger = logging.getLogger(__name__)
@@ -111,3 +111,22 @@ class DownloadService(BaseService):
 
         view = ResourceSelectView(resources)
         return view, "请选择你要下载的版本："
+
+    async def increment_download_count(self, session: AsyncSession, resource_id: int):
+        """
+        为给定资源增加下载计数
+        """
+        db_resource = await self.resource_repo.get(session, id=resource_id)
+
+        # 如果找不到资源，则记录警告并提前返回
+        if not db_resource:
+            logger.warning(
+                f"尝试为资源 ID {resource_id} 增加下载计数，但在数据库中未找到该资源。"
+            )
+            return
+
+        db_resource.download_count += 1
+        session.add(db_resource)  # 将更改暂存，由调用方的上下文管理器负责提交。
+        logger.info(
+            f"资源 {db_resource.id} 的下载计数已增加至 {db_resource.download_count}"
+        )

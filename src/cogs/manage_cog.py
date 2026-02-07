@@ -3,7 +3,6 @@
 这个 Cog 模块负责处理所有与资源管理相关的命令。
 """
 
-# --- 导入 ---
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -15,11 +14,6 @@ from src.services.management_service import ManagementService
 
 if TYPE_CHECKING:
     from main import OdysseiaProtect
-
-
-# ===================================================================================
-# 定义 ManageCog 类
-# ===================================================================================
 
 
 class ManageCog(commands.Cog):
@@ -63,12 +57,6 @@ class ManageCog(commands.Cog):
             await interaction.followup.send(
                 "发生了一个未知错误，无法生成响应。", ephemeral=True
             )
-
-
-# ===================================================================================
-# Cog 的入口点函数
-# ===================================================================================
-
 
 async def setup(bot: "OdysseiaProtect"):
     """将这个 Cog 注册到 Bot 实例中。"""

@@ -3,7 +3,6 @@
 这个 Cog 模块负责处理所有与文件“下载”相关的命令和交互。
 """
 
-# --- 导入 ---
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -14,11 +13,6 @@ from src.database.database import AsyncSessionLocal
 
 if TYPE_CHECKING:
     from main import OdysseiaProtect
-
-# ===================================================================================
-# 定义 DownloadCog 类
-# ===================================================================================
-
 
 class DownloadCog(commands.Cog):
     """
@@ -48,12 +42,6 @@ class DownloadCog(commands.Cog):
         # 使用关键字参数解包来发送响应
         # 如果 "view" 不在字典中，它就不会被作为参数传递
         await interaction.followup.send(**response_data, ephemeral=True)
-
-
-# ===================================================================================
-# Cog 的入口点函数
-# ===================================================================================
-
 
 async def setup(bot: "OdysseiaProtect"):
     """将这个 Cog 注册到 Bot 实例中。"""
