@@ -106,25 +106,23 @@ class OdysseiaProtect(commands.Bot):
                 except Exception as e:
                     logger.error(f"加载 Cog {cog_name} 失败。", exc_info=e)
 
-        # 同步斜杠命令到指定的测试服务器（即时生效）
+        # 清理测试服务器的专属命令
         if TEST_GUILDS:
-            logger.info(f"检测到 {len(TEST_GUILDS)} 个测试服务器，准备同步...")
+            logger.info(f"检测到 {len(TEST_GUILDS)} 个测试服务器，正在清理专属命令以消除重复...")
             for guild_id in TEST_GUILDS:
                 try:
                     test_guild = discord.Object(id=guild_id)
-                    # 将全局命令复制到该测试服务器
-                    self.tree.copy_global_to(guild=test_guild)
-                    synced_test = await self.tree.sync(guild=test_guild)
-                    logger.info(f"✅ 成功向测试服务器 {guild_id} 同步 {len(synced_test)} 条命令。")
+                    self.tree.clear_commands(guild=test_guild)
+                    await self.tree.sync(guild=test_guild)
+                    
+                    logger.info(f"✅ 成功清理测试服务器 {guild_id} 的专属命令。")
                 except discord.Forbidden:
-                    logger.warning(f"❌ 无法向测试服务器 {guild_id} 同步：Bot不在该服务器或缺少应用命令权限。")
+                    logger.warning(f"❌ 无法操作测试服务器 {guild_id}：Bot不在该服务器或缺少权限。")
                 except Exception as e:
-                    logger.error(f"❌ 向测试服务器 {guild_id} 同步时发生错误: {e}")
-        else:
-            logger.info("未配置测试服务器，跳过测试服同步步骤。")
+                    logger.error(f"❌ 清理测试服务器 {guild_id} 时发生错误: {e}")
 
-        # 全局同步（受 Discord 缓存影响，新服务器可能需要最多一小时生效）
-        logger.info("🌐 正在同步全局应用命令 (全局同步可能有缓存延迟)...")
+        # 全局同步
+        logger.info("🌐 正在同步全局应用命令...")
         try:
             synced_global = await self.tree.sync()
             logger.info(f"✅ 已成功全局同步 {len(synced_global)} 条应用命令。")
