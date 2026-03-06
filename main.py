@@ -41,7 +41,15 @@ logger = logging.getLogger(__name__)
 # --- 环境变量 ---
 load_dotenv()
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-TEST_GUILD_ID = os.getenv("TEST_GUILD_ID")
+
+# 解析测试服务器 ID（支持逗号分隔，例如：123456789,987654321）
+test_guild_env = os.getenv("TEST_GUILD_IDS") or os.getenv("TEST_GUILD_ID") or ""
+TEST_GUILDS = []
+if test_guild_env:
+    for gid in test_guild_env.split(","):
+        gid = gid.strip()
+        if gid.isdigit():
+            TEST_GUILDS.append(int(gid))
 
 
 # --- Bot 核心类 ---
@@ -81,12 +89,12 @@ class OdysseiaProtect(commands.Bot):
         if self.user:
             logger.info(f"成功以 {self.user} (ID: {self.user.id}) 的身份登录！")
 
-        # 1. 初始化数据库
+        # 初始化数据库
         logger.info("正在初始化数据库...")
         await init_db()
         logger.info("数据库初始化完成。")
 
-        # 2. 动态加载 Cogs
+        # 动态加载 Cogs
         logger.info("开始加载 Cogs...")
         cogs_path = Path(__file__).parent / "src" / "cogs"
         for cog_file in cogs_path.glob("*.py"):
@@ -98,21 +106,30 @@ class OdysseiaProtect(commands.Bot):
                 except Exception as e:
                     logger.error(f"加载 Cog {cog_name} 失败。", exc_info=e)
 
-        # 3. 同步斜杠命令到测试服务器
-        if TEST_GUILD_ID:
-            logger.info(f"检测到测试服务器 ID，正在向 {TEST_GUILD_ID} 同步命令...")
-            test_guild = discord.Object(id=int(TEST_GUILD_ID))
-            # 将所有全局命令复制到此服务器并同步
-            self.tree.copy_global_to(guild=test_guild)
-            synced = await self.tree.sync(guild=test_guild)
-            logger.info(f"已向测试服务器同步 {len(synced)} 条应用命令。")
+        # 同步斜杠命令到指定的测试服务器（即时生效）
+        if TEST_GUILDS:
+            logger.info(f"检测到 {len(TEST_GUILDS)} 个测试服务器，准备同步...")
+            for guild_id in TEST_GUILDS:
+                try:
+                    test_guild = discord.Object(id=guild_id)
+                    # 将全局命令复制到该测试服务器
+                    self.tree.copy_global_to(guild=test_guild)
+                    synced_test = await self.tree.sync(guild=test_guild)
+                    logger.info(f"✅ 成功向测试服务器 {guild_id} 同步 {len(synced_test)} 条命令。")
+                except discord.Forbidden:
+                    logger.warning(f"❌ 无法向测试服务器 {guild_id} 同步：Bot不在该服务器或缺少应用命令权限。")
+                except Exception as e:
+                    logger.error(f"❌ 向测试服务器 {guild_id} 同步时发生错误: {e}")
         else:
-            logger.warning(
-                "未设置 TEST_GUILD_ID，将进行全局命令同步（可能需要长达一小时生效）。"
-            )
-            logger.info("正在同步全局应用命令...")
-            synced = await self.tree.sync()
-            logger.info(f"已全局同步 {len(synced)} 条应用命令。")
+            logger.info("未配置测试服务器，跳过测试服同步步骤。")
+
+        # 全局同步（受 Discord 缓存影响，新服务器可能需要最多一小时生效）
+        logger.info("🌐 正在同步全局应用命令 (全局同步可能有缓存延迟)...")
+        try:
+            synced_global = await self.tree.sync()
+            logger.info(f"✅ 已成功全局同步 {len(synced_global)} 条应用命令。")
+        except Exception as e:
+            logger.error(f"❌ 全局同步命令时发生错误: {e}")
 
     async def on_ready(self):
         """当 Bot 完全准备就绪时调用。"""
