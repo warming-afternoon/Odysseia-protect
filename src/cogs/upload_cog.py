@@ -11,6 +11,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from src.database.database import AsyncSessionLocal
+from src.utils.auth import assert_thread_author
 
 if TYPE_CHECKING:
     from main import OdysseiaProtect
@@ -85,6 +86,7 @@ class UploadCog(commands.Cog):
             )
             return
 
+        # 参数校验
         if mode == "secure" and not file:
             await interaction.response.send_message(
                 "❌ **参数错误**\n您选择了 **受保护文件**，但未提供文件附件。",
@@ -99,6 +101,11 @@ class UploadCog(commands.Cog):
             return
 
         async with AsyncSessionLocal() as session:
+            # 权限校验：仅允许帖主上传
+            if not await assert_thread_author(session, interaction=interaction):
+                return
+
+            # 服务层处理上传
             result = await self.bot.upload_service.handle_upload(
                 session,
                 interaction=interaction,
@@ -153,8 +160,11 @@ async def setup(bot: "OdysseiaProtect"):
             )
             return
 
-        # 我们直接使用从 setup 传递进来的、类型正确的 bot 实例
         async with AsyncSessionLocal() as session:
+            # 权限校验：仅允许帖主上传
+            if not await assert_thread_author(session, interaction=interaction):
+                return
+
             result = await bot.upload_service.handle_upload(
                 session,
                 interaction=interaction,
@@ -209,6 +219,9 @@ async def setup(bot: "OdysseiaProtect"):
             return
 
         async with AsyncSessionLocal() as session:
+            # 权限校验：仅允许帖主上传
+            if not await assert_thread_author(session, interaction=interaction):
+                return
             result = await bot.upload_service.handle_secure_upload_from_message(
                 session,
                 interaction=interaction,
