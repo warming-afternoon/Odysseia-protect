@@ -1,5 +1,6 @@
 import os
 from typing import AsyncGenerator
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import declarative_base
 import logging
@@ -14,6 +15,12 @@ DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite+aiosqlite:///{DB_PATH}")
 # 创建异步数据库引擎
 # echo=True 会打印所有执行的SQL语句，便于调试
 engine = create_async_engine(DATABASE_URL)
+
+
+@event.listens_for(engine.sync_engine, "connect")
+def _enable_wal(dbapi_connection, connection_record):
+    """为每个新连接启用 WAL 模式，提升并发读写性能。"""
+    dbapi_connection.execute("PRAGMA journal_mode=WAL")
 
 # 创建一个异步会话生成器
 # expire_on_commit=False 防止在提交后 ORM 对象的属性被过期
