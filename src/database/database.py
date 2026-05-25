@@ -4,8 +4,10 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from sqlalchemy.orm import declarative_base
 import logging
 
+from src.enums.path import DB_PATH
+
 # --- 数据库配置 ---
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///data/bot_database.db")
+DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite+aiosqlite:///{DB_PATH}")
 
 # --- SQLAlchemy 引擎和会话设置 ---
 
