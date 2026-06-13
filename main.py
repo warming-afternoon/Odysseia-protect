@@ -60,7 +60,6 @@ class OdysseiaProtect(commands.Bot):
         # 定义 Bot Intents
         intents = discord.Intents.default()
         intents.message_content = True  # 允许读取消息内容
-        intents.members = True  # 允许访问成员列表和事件
 
         super().__init__(
             command_prefix="!",  # 虽然主要用斜杠命令，但保留前缀
