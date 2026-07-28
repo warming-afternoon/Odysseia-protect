@@ -13,6 +13,7 @@ class ThreadBase(BaseModel):
     public_thread_id: int
     author_id: int
     warehouse_thread_id: Optional[int] = None
+    download_panel_message_id: Optional[int] = None
     # reaction_required: bool = False
     # reaction_emoji: Optional[str] = None
 
@@ -23,6 +24,7 @@ class ThreadCreate(ThreadBase):
 
 class ThreadUpdate(BaseModel):
     warehouse_thread_id: Optional[int] = None
+    download_panel_message_id: Optional[int] = None
     # reaction_required: Optional[bool] = None
     # reaction_emoji: Optional[str] = None
 

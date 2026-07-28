@@ -56,6 +56,9 @@ ENV/
 # VSCode
 .vscode/
 
+# macOS
+.DS_Store
+
 # Database files
 *.db
 *.sqlite

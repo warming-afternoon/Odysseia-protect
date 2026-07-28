@@ -10,7 +10,9 @@ import discord
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database.models import UploadMode
+from src.dto.resource_dto import ResourceDTO
 from src.services.base import BaseService
+from src.ui.download_entry_ui import DownloadEntryView, build_download_entry_embed
 from src.ui.resource_select_view import ResourceSelectView
 from src.utils.formatting import format_resource_list_chunks
 
@@ -86,6 +88,42 @@ class DownloadService(BaseService):
         view = ResourceSelectView(secure_resources)
         return {"embed": embed, "view": view}
 
+    async def ensure_download_entry(
+        self,
+        session: AsyncSession,
+        *,
+        channel: discord.Thread,
+        thread_model,
+    ) -> None:
+        """幂等创建帖子内的公开下载入口消息。"""
+        if thread_model.download_panel_message_id:
+            try:
+                await channel.fetch_message(thread_model.download_panel_message_id)
+                return
+            except discord.NotFound:
+                logger.warning(
+                    "帖子 %s 的下载入口消息已不存在，将重新创建。", channel.id
+                )
+            except discord.Forbidden:
+                logger.warning("Bot 无权检查帖子 %s 的下载入口消息。", channel.id)
+                return
+
+        message = await channel.send(
+            embed=build_download_entry_embed(), view=DownloadEntryView()
+        )
+        await self.thread_repo.update(
+            session,
+            db_obj=thread_model,
+            obj_in={"download_panel_message_id": message.id},
+        )
+
+        try:
+            await message.pin(reason="固定 Odysseia Protect 下载入口")
+        except discord.Forbidden:
+            logger.warning("Bot 无权置顶帖子 %s 的下载入口消息。", channel.id)
+        except discord.HTTPException as exc:
+            logger.warning("置顶帖子 %s 的下载入口消息失败: %s", channel.id, exc)
+
     async def create_download_view(
         self, session: AsyncSession, *, public_thread_id: int
     ) -> tuple[Optional[discord.ui.View], str]:
@@ -130,3 +168,38 @@ class DownloadService(BaseService):
         logger.info(
             f"资源 {db_resource.id} 的下载计数已增加至 {db_resource.download_count}"
         )
+
+    async def fetch_fresh_url(self, resource: ResourceDTO) -> str:
+        """根据源消息动态获取当前有效的 Discord 附件 URL。"""
+        channel_id = resource.warehouse_thread_id or resource.public_thread_id
+        if not channel_id:
+            raise ValueError("数据库中未找到该资源关联的频道ID。")
+
+        source_channel = await self.bot.fetch_channel(channel_id)
+        if not isinstance(source_channel, (discord.TextChannel, discord.Thread)):
+            raise ValueError("资源源频道类型无效。")
+
+        source_message = await source_channel.fetch_message(resource.source_message_id)
+        if not source_message.attachments:
+            raise ValueError("源消息中没有附件。")
+        return source_message.attachments[0].url
+
+    @staticmethod
+    def build_download_embed(resource: ResourceDTO, fresh_url: str) -> discord.Embed:
+        """构建同时适合直接下载和复制到 SillyTavern 的结果页。"""
+        embed = discord.Embed(
+            title="📥 角色卡下载",
+            description=(
+                f"**版本：** {resource.version_info}\n"
+                f"**文件：** `{resource.filename or '未命名文件'}`\n\n"
+                "📋 **SillyTavern 快速导入 URL**\n"
+                f"`{fresh_url}`\n\n"
+                f"[🌐 打开下载链接]({fresh_url})\n\n"
+                "链接具有时效性；失效后请重新打开下载面板获取。"
+            ),
+            color=discord.Color.green(),
+        )
+        filename = (resource.filename or "").lower()
+        if filename.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
+            embed.set_image(url=fresh_url)
+        return embed
