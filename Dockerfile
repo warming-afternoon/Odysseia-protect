@@ -1,25 +1,61 @@
-FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim
+# syntax=docker/dockerfile:1.7
+
+# ============================================================
+# python-base — 公共 Python 运行环境与 uv 配置
+# ============================================================
+FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim AS python-base
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    VIRTUAL_ENV=/app/.venv \
+    PATH="/app/.venv/bin:$PATH"
 
 WORKDIR /app
 
-# 1. 设置环境变量
-# UV_COMPILE_BYTECODE=1: 编译 pyc，启动更快
-# UV_LINK_MODE=copy: 在某些容器文件系统中，复制模式比硬链接更稳
-ENV UV_COMPILE_BYTECODE=1
-ENV UV_LINK_MODE=copy
+# ============================================================
+# runtime-deps — 仅安装 Bot 运行时第三方依赖
+# ============================================================
+FROM python-base AS runtime-deps
 
-# 2. 复制依赖文件
 COPY pyproject.toml uv.lock ./
 
-# 3. 安装依赖
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-install-project
+
+# ============================================================
+# dev-deps — 安装全部第三方依赖（含测试/迁移所需）
+# ============================================================
+FROM python-base AS dev-deps
+
+COPY pyproject.toml uv.lock ./
+
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project
 
-# 4. 将 uv 创建的虚拟环境加入 PATH
-ENV PATH="/app/.venv/bin:$PATH"
+# ============================================================
+# base — 安装项目源码，用于正常启动 Bot
+# ============================================================
+FROM runtime-deps AS base
 
-# 5. 复制项目代码
-COPY . .
+COPY alembic.ini migrate.py ./
+COPY alembic/ ./alembic/
+COPY src/ ./src/
+COPY main.py ./
 
-# 6. 启动
-CMD ["python", "main.py"]
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev
+
+# ============================================================
+# dev — 安装项目源码和全部依赖，用于迁移数据库等
+# ============================================================
+FROM dev-deps AS dev
+
+COPY alembic.ini migrate.py ./
+COPY alembic/ ./alembic/
+COPY src/ ./src/
+COPY main.py ./
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen

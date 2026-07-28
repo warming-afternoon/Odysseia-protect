@@ -1,14 +1,25 @@
-version: '3.8'
-
 services:
   odysseia-protect:
-    build: .
+    build:
+      context: .
+      target: base
     container_name: odysseia-protect
     restart: unless-stopped
     env_file:
       - .env
+    command: ["python", "main.py"]
     volumes:
       - ./data:/app/data
 
-volumes:
-  data:
+  odysseia-protect-migrate:
+    build:
+      context: .
+      target: dev
+    container_name: odysseia-protect-migrate
+    profiles:
+      - migrate
+    env_file:
+      - .env
+    command: ["python", "migrate.py"]
+    volumes:
+      - ./data:/app/data
