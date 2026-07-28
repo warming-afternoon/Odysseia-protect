@@ -85,6 +85,8 @@ class ResourceSelect(discord.ui.Select):
         # 将 ORM 对象转换为 DTO，避免 DetachedInstanceError
         resource_dto = ResourceDTO(
             id=selected_resource.id,
+            filename=selected_resource.filename,
+            version_info=selected_resource.version_info,
             password=selected_resource.password,
             source_message_id=selected_resource.source_message_id,
             warehouse_thread_id=selected_resource.thread.warehouse_thread_id,
@@ -93,53 +95,53 @@ class ResourceSelect(discord.ui.Select):
 
         # 如果资源有密码，立即弹出模态框
         if resource_dto.password:
-            modal = PasswordModal(resource=resource_dto)
+            modal = PasswordModal(
+                resource=resource_dto,
+                edit_in_place=bool(
+                    interaction.message and interaction.message.flags.ephemeral
+                ),
+            )
             await interaction.response.send_modal(modal)
             return
 
         # 对于没有密码的资源
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        edit_in_place = bool(
+            interaction.message and interaction.message.flags.ephemeral
+        )
+        await interaction.response.defer(ephemeral=not edit_in_place, thinking=True)
 
         try:
-            # 断言 bot 实例存在
-            assert isinstance(interaction.client, discord.Client)
-            bot = interaction.client
-
-            # 获取下载链接
-            # 如果是受保护文件，warehouse_thread_id 存在；否则用 public_thread_id
-            channel_id = (
-                resource_dto.warehouse_thread_id or resource_dto.public_thread_id
-            )
-            if not channel_id:
-                raise ValueError("数据库中未找到该资源关联的频道ID。")
-
-            source_channel = await bot.fetch_channel(channel_id)
-            assert isinstance(source_channel, (discord.TextChannel, discord.Thread))
-            source_message = await source_channel.fetch_message(
-                resource_dto.source_message_id
-            )
-
-            if source_message and source_message.attachments:
-                fresh_url = source_message.attachments[0].url
-            else:
-                raise ValueError("源消息或附件未找到")
+            download_service = getattr(interaction.client, "download_service", None)
+            if download_service is None:
+                raise RuntimeError("Bot 未配置下载服务。")
+            fresh_url = await download_service.fetch_fresh_url(resource_dto)
 
             # 触发下载事件，供其他组件监听（如下载计数器）
             interaction.client.dispatch("resource_downloaded", resource_dto)
 
-            # 发送结果
-            response_embed = discord.Embed(
-                title="🔗 下载链接",
-                description=f"您选择的资源下载链接如下请尽快下载：\n\n[点击这里下载]({fresh_url})",
-                color=discord.Color.green(),
+            response_embed = download_service.build_download_embed(
+                resource_dto, fresh_url
             )
-            await interaction.followup.send(embed=response_embed, ephemeral=True)
+            if edit_in_place:
+                await interaction.edit_original_response(
+                    embed=response_embed, view=self.view
+                )
+            else:
+                await interaction.followup.send(
+                    embed=response_embed, ephemeral=True
+                )
 
         except Exception as e:
             logger.error(
                 f"为资源 {selected_resource_id} 获取新下载链接失败", exc_info=e
             )
-            await interaction.followup.send(
-                "❌ 抱歉，获取下载链接时发生错误。源文件可能已被删除或Bot无法访问。",
-                ephemeral=True,
+            error_message = (
+                "❌ 抱歉，获取下载链接时发生错误。"
+                "源文件可能已被删除或Bot无法访问。"
             )
+            if edit_in_place:
+                await interaction.edit_original_response(
+                    content=error_message, embed=None, view=self.view
+                )
+            else:
+                await interaction.followup.send(error_message, ephemeral=True)

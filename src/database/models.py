@@ -35,6 +35,9 @@ class Thread(Base):
     warehouse_thread_id: Mapped[int | None] = mapped_column(
         BigInteger, unique=True, nullable=True
     )
+    download_panel_message_id: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True
+    )
     author_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     # reaction_required: Mapped[bool] = mapped_column(default=False, nullable=False)
     # reaction_emoji: Mapped[str | None] = mapped_column(String(50), nullable=True)

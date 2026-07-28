@@ -46,3 +46,25 @@ class DownloadCog(commands.Cog):
 async def setup(bot: "OdysseiaProtect"):
     """将这个 Cog 注册到 Bot 实例中。"""
     await bot.add_cog(DownloadCog(bot))
+
+    @app_commands.context_menu(name="打开下载面板")
+    async def open_download_panel(
+        interaction: discord.Interaction, message: discord.Message
+    ):
+        """从帖子内任意消息的 Apps 菜单打开私密下载面板。"""
+        if not isinstance(interaction.channel, discord.Thread) or not isinstance(
+            interaction.channel.parent, discord.ForumChannel
+        ):
+            await interaction.response.send_message(
+                "❌ 此入口只能在论坛帖子中使用。", ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        async with AsyncSessionLocal() as session:
+            response_data = await bot.download_service.handle_download_request(
+                session, source=interaction
+            )
+        await interaction.followup.send(**response_data, ephemeral=True)
+
+    bot.tree.add_command(open_download_panel)

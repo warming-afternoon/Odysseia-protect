@@ -22,6 +22,27 @@ logger = logging.getLogger(__name__)
 class UploadService(BaseService):
     """封装了所有与资源上传相关的业务逻辑。"""
 
+    async def _ensure_download_entry(
+        self,
+        session: AsyncSession,
+        *,
+        interaction: discord.Interaction,
+        thread_model,
+    ) -> None:
+        """上传成功后尽力创建公开入口，不让 UI 故障回滚资源。"""
+        if not isinstance(interaction.channel, discord.Thread):
+            return
+        try:
+            await self.bot.download_service.ensure_download_entry(
+                session, channel=interaction.channel, thread_model=thread_model
+            )
+            await session.commit()
+        except Exception as exc:
+            await session.rollback()
+            logger.error(
+                "为帖子 %s 创建下载入口失败。", interaction.channel.id, exc_info=exc
+            )
+
     async def _get_or_create_user(self, session: AsyncSession, *, user_id: int):
         """获取或创建用户记录。"""
         user = await self.user_repo.get(session, id=user_id)
@@ -175,6 +196,11 @@ class UploadService(BaseService):
                 )
             # 只有在所有数据库操作成功后才提交事务
             await session.commit()
+            if result.startswith("✅"):
+                # ponytail: 现有上传方法以本地化字符串表达结果；改为结构化结果后移除此判断。
+                await self._ensure_download_entry(
+                    session, interaction=interaction, thread_model=thread_model
+                )
             return result
         except Exception as e:
             log_identifier_on_error = file.filename if file else "N/A"
@@ -358,6 +384,9 @@ class UploadService(BaseService):
                 )
             )
             await session.commit()
+            await self._ensure_download_entry(
+                session, interaction=interaction, thread_model=thread_model
+            )
 
             # --- 新逻辑：快捷模式处理 ---
             if source_message:  # 仅当从上下文菜单调用时才处理
