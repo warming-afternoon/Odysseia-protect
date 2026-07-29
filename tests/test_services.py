@@ -7,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.services.upload_service import UploadService
 from src.services.download_service import DownloadService
 from src.services.management_service import ManagementService
-from src.services.reaction_wall_service import ReactionWallService
 from src.database.repositories.resource import ResourceRepository
 from src.database.repositories.thread import ThreadRepository
 from src.database.repositories.user import UserRepository
@@ -107,58 +106,6 @@ class TestUploadService:
 
         assert isinstance(result, NormalUploadModal)
 
-    async def test_handle_upload_permission_denied(self, db_session: AsyncSession):
-        """测试非作者用户上传时返回权限不足。"""
-        thread_repo = ThreadRepository()
-        resource_repo = ResourceRepository()
-        user_repo = UserRepository()
-        mock_bot = MagicMock()
-        service = UploadService(
-            bot=mock_bot,
-            resource_repo=resource_repo,
-            thread_repo=thread_repo,
-            user_repo=user_repo,
-        )
-
-        # 创建作者用户并同意隐私协议
-        author_user = UserCreate(id=111, has_agreed_to_privacy_policy=True)
-        await user_repo.create(db_session, obj_in=author_user)
-        # 创建非作者用户并同意隐私协议
-        non_author_user = UserCreate(id=222, has_agreed_to_privacy_policy=True)
-        await user_repo.create(db_session, obj_in=non_author_user)
-        # 创建帖子记录，作者为 111
-        thread_data = ThreadCreate(
-            public_thread_id=999,
-            author_id=111,
-            warehouse_thread_id=None,
-        )
-        await thread_repo.create(db_session, obj_in=thread_data)
-        await db_session.commit()
-
-        # 模拟交互，用户为 222（非作者）
-        mock_channel = MagicMock(spec=discord.Thread)
-        mock_channel.id = 999
-
-        mock_interaction = MagicMock()
-        mock_interaction.user.id = 222  # 非作者
-        mock_interaction.channel = mock_channel
-
-        # 执行
-        result = await service.handle_upload(
-            session=db_session,
-            interaction=mock_interaction,
-            mode="normal",
-            file=None,
-            message_link=None,
-        )
-
-        # 断言：应返回权限不足的 embed
-        assert isinstance(result, dict)
-        assert "embed" in result
-        assert result["embed"].title == "🚫 权限不足"
-        assert "view" not in result  # 只有 embed
-
-
 @pytest.mark.asyncio
 class TestDownloadService:
     """测试 DownloadService 的功能。"""
@@ -182,7 +129,7 @@ class TestDownloadService:
 
         result = await service.handle_download_request(
             session=db_session,
-            interaction=mock_interaction,
+            source=mock_interaction,
         )
 
         assert isinstance(result, dict)
@@ -230,7 +177,7 @@ class TestDownloadService:
 
         result = await service.handle_download_request(
             session=db_session,
-            interaction=mock_interaction,
+            source=mock_interaction,
         )
 
         assert isinstance(result, dict)
@@ -321,65 +268,8 @@ class TestManagementService:
 
 
 @pytest.mark.asyncio
-class TestReactionWallService:
-    """测试 ReactionWallService 的功能。"""
-
-    async def test_verify_user_reaction_without_requirement(self):
-        """测试当 reaction_required 为 False 时，验证通过。"""
-        thread_repo = ThreadRepository()
-        resource_repo = ResourceRepository()
-        user_repo = UserRepository()
-        mock_bot = MagicMock()
-        service = ReactionWallService(
-            bot=mock_bot,
-            resource_repo=resource_repo,
-            thread_repo=thread_repo,
-            user_repo=user_repo,
-        )
-
-        mock_thread = MagicMock(spec=discord.Thread)
-        mock_user = MagicMock(spec=discord.User)
-
-        # 模拟数据库帖子，reaction_required = False
-        db_thread = MagicMock()
-        db_thread.reaction_required = False
-
-        result = await service.verify_user_reaction(
-            thread=db_thread,
-            discord_thread=mock_thread,
-            user=mock_user,
-        )
-        assert result is True
-
-    async def test_set_reaction_required(self, db_session: AsyncSession):
-        """测试设置 reaction_required。"""
-        thread_repo = ThreadRepository()
-        resource_repo = ResourceRepository()
-        user_repo = UserRepository()
-        mock_bot = MagicMock()
-        service = ReactionWallService(
-            bot=mock_bot,
-            resource_repo=resource_repo,
-            thread_repo=thread_repo,
-            user_repo=user_repo,
-        )
-
-        # 创建帖子
-        thread_data = ThreadCreate(
-            public_thread_id=777,
-            author_id=100,
-            warehouse_thread_id=None,
-        )
-        thread = await thread_repo.create(db_session, obj_in=thread_data)
-        await db_session.commit()
-
-        updated = await service.set_reaction_required(
-            session=db_session,
-            thread_id=thread.id,
-            required=True,
-        )
-        assert updated is not None
-        assert updated.reaction_required is True
+class TestManagementServiceExtended:
+    """测试 ManagementService 的资源更新和删除功能。"""
 
     async def test_update_resource(self, db_session: AsyncSession):
         """测试更新资源信息。"""
@@ -524,38 +414,3 @@ class TestReactionWallService:
         mock_bot.fetch_channel.assert_called_once_with(123456)
         mock_channel.fetch_message.assert_called_once_with(333)
         mock_message.delete.assert_called_once()
-
-
-@pytest.mark.asyncio
-class TestReactionWallServiceExtended:
-    """ReactionWallService 的额外测试。"""
-
-    async def test_set_reaction_emoji(self, db_session: AsyncSession):
-        """测试设置自定义反应表情。"""
-        thread_repo = ThreadRepository()
-        resource_repo = ResourceRepository()
-        user_repo = UserRepository()
-        mock_bot = MagicMock()
-        service = ReactionWallService(
-            bot=mock_bot,
-            resource_repo=resource_repo,
-            thread_repo=thread_repo,
-            user_repo=user_repo,
-        )
-
-        # 创建帖子
-        thread_data = ThreadCreate(
-            public_thread_id=555,
-            author_id=100,
-            warehouse_thread_id=None,
-        )
-        thread = await thread_repo.create(db_session, obj_in=thread_data)
-        await db_session.commit()
-
-        updated = await service.set_reaction_emoji(
-            session=db_session,
-            thread_id=thread.id,
-            emoji="👍",
-        )
-        assert updated is not None
-        assert updated.reaction_emoji == "👍"

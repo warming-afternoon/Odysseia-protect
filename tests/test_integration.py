@@ -16,6 +16,7 @@ from src.database.models import UploadMode
 from src.services.upload_service import UploadService
 from src.services.download_service import DownloadService
 from src.services.management_service import ManagementService
+from src.utils.auth import assert_thread_author
 
 
 @pytest.mark.asyncio
@@ -29,6 +30,7 @@ class TestIntegration:
         resource_repo = ResourceRepository()
         user_repo = UserRepository()
         mock_bot = MagicMock()
+        mock_bot.download_service.ensure_download_entry = AsyncMock()
         upload_service = UploadService(
             bot=mock_bot,
             resource_repo=resource_repo,
@@ -109,7 +111,7 @@ class TestIntegration:
         # 6. 测试下载请求
         download_result = await download_service.handle_download_request(
             session=db_session,
-            interaction=mock_interaction,
+            source=mock_interaction,
         )
         assert "embed" in download_result
         assert "view" in download_result
@@ -131,25 +133,11 @@ class TestIntegration:
         # 8. 清理（可选）
         # 测试通过
 
-    async def test_upload_permission_denied(self, db_session: AsyncSession):
-        """测试非作者用户上传时权限不足。"""
+    async def test_non_author_is_rejected_before_upload(
+        self, db_session: AsyncSession
+    ):
+        """测试上传入口在调用服务前拒绝非帖子作者。"""
         thread_repo = ThreadRepository()
-        resource_repo = ResourceRepository()
-        user_repo = UserRepository()
-        mock_bot = MagicMock()
-        upload_service = UploadService(
-            bot=mock_bot,
-            resource_repo=resource_repo,
-            thread_repo=thread_repo,
-            user_repo=user_repo,
-        )
-
-        # 创建作者用户并同意隐私协议
-        author_user = UserCreate(id=111, has_agreed_to_privacy_policy=True)
-        await user_repo.create(db_session, obj_in=author_user)
-        # 创建非作者用户并同意隐私协议
-        non_author_user = UserCreate(id=222, has_agreed_to_privacy_policy=True)
-        await user_repo.create(db_session, obj_in=non_author_user)
         # 创建帖子记录，作者为 111
         thread_data = ThreadCreate(
             public_thread_id=999,
@@ -162,32 +150,20 @@ class TestIntegration:
         # 模拟交互，用户为 222（非作者）
         mock_channel = MagicMock(spec=discord.Thread)
         mock_channel.id = 999
+        mock_channel.owner_id = None
         mock_interaction = MagicMock()
         mock_interaction.user.id = 222
         mock_interaction.channel = mock_channel
+        mock_interaction.response.send_message = AsyncMock()
 
-        # 调用 handle_upload（应返回权限不足的 embed）
-        result = await upload_service.handle_upload(
-            session=db_session,
+        allowed = await assert_thread_author(
+            db_session,
             interaction=mock_interaction,
-            mode="normal",
-            file=None,
-            message_link=None,
+            thread_repo=thread_repo,
         )
-        assert isinstance(result, dict)
-        assert "embed" in result
-        assert result["embed"].title == "🚫 权限不足"
-        assert "view" not in result
 
-    async def test_download_without_reaction(self, db_session: AsyncSession):
-        """测试用户未做出反应时无法下载受保护资源。"""
-        # 此测试需要模拟反应墙服务，但为了简化，我们只测试下载服务
-        # 实际上，下载服务不检查反应墙，反应墙在下载 UI 中处理。
-        # 我们可以测试反应墙服务的 verify_user_reaction 方法。
-        pass
-
-    async def test_download_without_password(self, db_session: AsyncSession):
-        """测试下载受保护资源时密码验证。"""
-        # 密码验证在下载 UI 中处理，服务层不直接验证。
-        # 我们可以测试 ResourceSelectView 的密码验证逻辑，但这属于 UI 测试。
-        pass
+        assert allowed is False
+        mock_interaction.response.send_message.assert_awaited_once_with(
+            "❌ 权限不足：只有本帖的作者才能执行此操作。",
+            ephemeral=True,
+        )

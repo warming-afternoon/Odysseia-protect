@@ -19,11 +19,21 @@ class ResourceSelectView(discord.ui.View):
     一个包含版本选择下拉菜单的交互式视图。
     """
 
-    def __init__(self, resources: Sequence[Resource]):
+    def __init__(
+        self,
+        resources: Sequence[Resource],
+        *,
+        resource_list_embed: discord.Embed | None = None,
+    ):
         # 将 timeout 设置为 4 小时 (4 * 60 * 60 = 14400 秒)
         super().__init__(timeout=14400.0)
 
-        self.add_item(ResourceSelect(resources))
+        self.add_item(
+            ResourceSelect(
+                resources,
+                resource_list_embed=resource_list_embed,
+            )
+        )
 
     async def on_timeout(self):
         """

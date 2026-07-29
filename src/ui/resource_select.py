@@ -21,7 +21,13 @@ class ResourceSelect(discord.ui.Select):
     资源选择下拉菜单。
     """
 
-    def __init__(self, resources: Sequence[Resource]):
+    def __init__(
+        self,
+        resources: Sequence[Resource],
+        *,
+        resource_list_embed: discord.Embed | None = None,
+    ):
+        self.resource_list_embed = resource_list_embed
         options = []
         # Discord 的下拉菜单最多只能有 25 个选项
         for resource in resources[:25]:
@@ -93,22 +99,33 @@ class ResourceSelect(discord.ui.Select):
             public_thread_id=selected_resource.thread.public_thread_id,
         )
 
+        resource_list_embed = self.resource_list_embed
+        if (
+            resource_list_embed is None
+            and interaction.message
+            and interaction.message.embeds
+        ):
+            resource_list_embed = interaction.message.embeds[-1]
+
+        if resource_list_embed is None or self.view is None:
+            await interaction.response.send_message(
+                "❌ 下载面板状态已失效，请重新点击“获取角色卡”。",
+                ephemeral=True,
+            )
+            return
+
         # 如果资源有密码，立即弹出模态框
         if resource_dto.password:
             modal = PasswordModal(
                 resource=resource_dto,
-                edit_in_place=bool(
-                    interaction.message and interaction.message.flags.ephemeral
-                ),
+                resource_list_embed=resource_list_embed,
+                panel_view=self.view,
             )
             await interaction.response.send_modal(modal)
             return
 
         # 对于没有密码的资源
-        edit_in_place = bool(
-            interaction.message and interaction.message.flags.ephemeral
-        )
-        await interaction.response.defer(ephemeral=not edit_in_place, thinking=True)
+        await interaction.response.defer()
 
         try:
             download_service = getattr(interaction.client, "download_service", None)
@@ -122,14 +139,10 @@ class ResourceSelect(discord.ui.Select):
             response_embed = download_service.build_download_embed(
                 resource_dto, fresh_url
             )
-            if edit_in_place:
-                await interaction.edit_original_response(
-                    embed=response_embed, view=self.view
-                )
-            else:
-                await interaction.followup.send(
-                    embed=response_embed, ephemeral=True
-                )
+            await interaction.edit_original_response(
+                embeds=[response_embed, resource_list_embed],
+                view=self.view,
+            )
 
         except Exception as e:
             logger.error(
@@ -139,9 +152,4 @@ class ResourceSelect(discord.ui.Select):
                 "❌ 抱歉，获取下载链接时发生错误。"
                 "源文件可能已被删除或Bot无法访问。"
             )
-            if edit_in_place:
-                await interaction.edit_original_response(
-                    content=error_message, embed=None, view=self.view
-                )
-            else:
-                await interaction.followup.send(error_message, ephemeral=True)
+            await interaction.followup.send(error_message, ephemeral=True)

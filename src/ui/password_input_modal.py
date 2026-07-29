@@ -9,10 +9,17 @@ logger = logging.getLogger(__name__)
 class PasswordModal(discord.ui.Modal, title="请输入下载密码"):
     """一个用于在下载前验证密码的弹出式模态框。"""
 
-    def __init__(self, resource: ResourceDTO, *, edit_in_place: bool = False):
+    def __init__(
+        self,
+        resource: ResourceDTO,
+        *,
+        resource_list_embed: discord.Embed,
+        panel_view: discord.ui.View,
+    ):
         super().__init__(timeout=300)  # 5分钟超时
         self.resource = resource
-        self.edit_in_place = edit_in_place
+        self.resource_list_embed = resource_list_embed
+        self.panel_view = panel_view
 
         self.password_input = discord.ui.TextInput(
             label="密码",
@@ -35,9 +42,7 @@ class PasswordModal(discord.ui.Modal, title="请输入下载密码"):
             return
 
         # 密码正确，立即延迟响应
-        await interaction.response.defer(
-            ephemeral=not self.edit_in_place, thinking=True
-        )
+        await interaction.response.defer()
 
         try:
             download_service = getattr(interaction.client, "download_service", None)
@@ -49,10 +54,10 @@ class PasswordModal(discord.ui.Modal, title="请输入下载密码"):
             interaction.client.dispatch("resource_downloaded", self.resource)
 
             embed = download_service.build_download_embed(self.resource, fresh_url)
-            if self.edit_in_place:
-                await interaction.edit_original_response(embed=embed)
-            else:
-                await interaction.followup.send(embed=embed, ephemeral=True)
+            await interaction.edit_original_response(
+                embeds=[embed, self.resource_list_embed],
+                view=self.panel_view,
+            )
 
         except Exception as e:
             logger.error(f"为资源 {self.resource.id} 获取新下载链接失败", exc_info=e)
@@ -60,9 +65,4 @@ class PasswordModal(discord.ui.Modal, title="请输入下载密码"):
                 "❌ 抱歉，获取下载链接时发生错误。"
                 "源文件可能已被删除或Bot无法访问。"
             )
-            if self.edit_in_place:
-                await interaction.edit_original_response(
-                    content=error_message, embed=None
-                )
-            else:
-                await interaction.followup.send(error_message, ephemeral=True)
+            await interaction.followup.send(error_message, ephemeral=True)

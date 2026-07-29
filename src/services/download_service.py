@@ -85,7 +85,10 @@ class DownloadService(BaseService):
             embed.add_field(name=name, value=chunk, inline=False)
 
         # 只将受保护的资源传递给下拉菜单视图
-        view = ResourceSelectView(secure_resources)
+        view = ResourceSelectView(
+            secure_resources,
+            resource_list_embed=embed,
+        )
         return {"embed": embed, "view": view}
 
     async def ensure_download_entry(
