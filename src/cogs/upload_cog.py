@@ -27,6 +27,11 @@ class UploadCog(commands.Cog):
     def __init__(self, bot: "OdysseiaProtect"):
         self.bot = bot
 
+    upload_group = app_commands.Group(
+        name="上传",
+        description="上传一个新的文件版本。",
+    )
+
     async def _handle_service_result(
         self, interaction: discord.Interaction, result: Any
     ):
@@ -52,50 +57,20 @@ class UploadCog(commands.Cog):
         elif isinstance(result, discord.ui.Modal):
             await interaction.response.send_modal(result)
 
-    @app_commands.command(name="上传", description="上传一个新的文件版本。")
-    @app_commands.describe(
-        mode="选择上传类型。",
-        file="【受保护文件】请在此处上传文件附件。",
-        message_link="【普通文件】请在此处粘贴消息链接。",
-    )
-    @app_commands.choices(
-        mode=[
-            discord.app_commands.Choice(
-                name="普通文件 (引用帖子内已有消息)",
-                value="normal",
-            ),
-            discord.app_commands.Choice(
-                name="受保护文件 (由 Bot 负责存储)",
-                value="secure",
-            ),
-        ]
-    )
-    async def upload(
+    async def _start_upload(
         self,
         interaction: discord.Interaction,
+        *,
         mode: str,
         file: discord.Attachment | None = None,
         message_link: str | None = None,
     ):
+        """执行两个上传子命令共用的校验、鉴权与响应流程。"""
         if not isinstance(interaction.channel, discord.Thread) or not isinstance(
             interaction.channel.parent, discord.ForumChannel
         ):
             await interaction.response.send_message(
                 "❌ **操作无效**\n此命令只能在论坛帖子中使用。",
-                ephemeral=True,
-            )
-            return
-
-        # 参数校验
-        if mode == "secure" and not file:
-            await interaction.response.send_message(
-                "❌ **参数错误**\n您选择了 **受保护文件**，但未提供文件附件。",
-                ephemeral=True,
-            )
-            return
-        if mode == "normal" and not message_link:
-            await interaction.response.send_message(
-                "❌ **参数错误**\n您选择了 **普通文件**，但未提供消息链接。",
                 ephemeral=True,
             )
             return
@@ -133,6 +108,40 @@ class UploadCog(commands.Cog):
                 pass
         else:
             await self._handle_service_result(interaction, result)
+
+    @upload_group.command(
+        name="普通文件",
+        description="引用帖子内已有消息，登记一个普通资源版本。",
+    )
+    @app_commands.describe(message_link="帖子内资源消息的链接。")
+    async def upload_normal(
+        self,
+        interaction: discord.Interaction,
+        message_link: str,
+    ):
+        await self._start_upload(
+            interaction,
+            mode="normal",
+            file=None,
+            message_link=message_link,
+        )
+
+    @upload_group.command(
+        name="受保护文件",
+        description="将附件交给 Bot 存储为受保护资源。",
+    )
+    @app_commands.describe(file="需要保护的文件附件。")
+    async def upload_secure(
+        self,
+        interaction: discord.Interaction,
+        file: discord.Attachment,
+    ):
+        await self._start_upload(
+            interaction,
+            mode="secure",
+            file=file,
+            message_link=None,
+        )
 
 
 # ===================================================================================

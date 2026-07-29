@@ -18,12 +18,12 @@
 此流程完美地体现了各层如何协作：
 
 1.  **`cogs.upload`**:
-    -   定义 `/上传` slash command，接收文件、版本信息、密码等参数。
-    -   **职责**: 解析 Discord `Interaction` 对象，提取出纯粹的数据。
-    -   调用 `services.ResourceService.upload_resource()`，将数据和 `mode` (普通/安全) 传递下去。
+    -   定义 `/上传 普通文件 message_link` 和 `/上传 受保护文件 file` 两个子命令。
+    -   **职责**: 校验使用场景和帖子作者权限，并将子命令映射为普通或受保护模式。
+    -   调用 `services.UploadService`，随后通过对应 Modal 收集版本信息和可选密码。
 
-2.  **`services.ResourceService`**:
-    -   `upload_resource(..., mode)` 方法是核心。
+2.  **`services.UploadService`**:
+    -   上传提交处理方法是核心。
     -   **职责**: 根据 `mode` 参数执行不同的业务逻辑。
         -   **If `mode` is '安全模式'**:
             1.  调用 Discord API 在私密仓库频道创建一个新帖子 (需要一个 `DiscordService` 或类似的工具来封装API调用)。
