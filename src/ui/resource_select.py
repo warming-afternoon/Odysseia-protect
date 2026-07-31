@@ -109,7 +109,7 @@ class ResourceSelect(discord.ui.Select):
 
         if resource_list_embed is None or self.view is None:
             await interaction.response.send_message(
-                "❌ 下载面板状态已失效，请重新点击“获取角色卡”。",
+                "❌ 下载面板状态已失效，请重新使用 `/下载` 或右键“打开下载面板”。",
                 ephemeral=True,
             )
             return

@@ -6,18 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 from src.database.models import UploadMode
 from src.dto.resource_dto import ResourceDTO
 from src.services.download_service import DownloadService
-from src.ui.download_entry_ui import DownloadEntryView
 from src.ui.password_input_modal import PasswordModal
 from src.ui.resource_select_view import ResourceSelectView
-
-
-@pytest.mark.asyncio
-async def test_download_entry_view_is_persistent():
-    view = DownloadEntryView()
-
-    assert view.timeout is None
-    assert len(view.children) == 1
-    assert view.children[0].custom_id == "odysseia-protect:open-download-panel"
 
 
 def test_download_embed_exposes_copyable_url_and_png_preview():
@@ -83,6 +73,7 @@ def make_interaction(download_service: MagicMock) -> SimpleNamespace:
         followup=SimpleNamespace(send=AsyncMock()),
         edit_original_response=AsyncMock(),
         client=client,
+        message=None,
     )
 
 
@@ -188,6 +179,35 @@ async def test_resource_select_failure_keeps_panel_and_sends_private_error():
     interaction.edit_original_response.assert_not_awaited()
     interaction.followup.send.assert_awaited_once()
     assert interaction.followup.send.await_args.kwargs["ephemeral"] is True
+
+
+@pytest.mark.asyncio
+async def test_expired_resource_select_points_to_available_download_entries():
+    resource = make_resource(1, version="v1")
+    view = ResourceSelectView([resource])
+    select = view.children[0]
+    select._values = ["1"]
+    interaction = make_interaction(MagicMock())
+
+    repository = MagicMock()
+    repository.get_with_thread = AsyncMock(return_value=resource)
+
+    with (
+        patch(
+            "src.ui.resource_select.AsyncSessionLocal",
+            return_value=make_session_context(),
+        ),
+        patch(
+            "src.ui.resource_select.ResourceRepository",
+            return_value=repository,
+        ),
+    ):
+        await select.callback(interaction)
+
+    interaction.response.send_message.assert_awaited_once_with(
+        "❌ 下载面板状态已失效，请重新使用 `/下载` 或右键“打开下载面板”。",
+        ephemeral=True,
+    )
 
 
 @pytest.mark.asyncio

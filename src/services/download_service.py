@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.database.models import UploadMode
 from src.dto.resource_dto import ResourceDTO
 from src.services.base import BaseService
-from src.ui.download_entry_ui import DownloadEntryView, build_download_entry_embed
 from src.ui.resource_select_view import ResourceSelectView
 from src.utils.formatting import format_resource_list_chunks
 
@@ -90,42 +89,6 @@ class DownloadService(BaseService):
             resource_list_embed=embed,
         )
         return {"embed": embed, "view": view}
-
-    async def ensure_download_entry(
-        self,
-        session: AsyncSession,
-        *,
-        channel: discord.Thread,
-        thread_model,
-    ) -> None:
-        """幂等创建帖子内的公开下载入口消息。"""
-        if thread_model.download_panel_message_id:
-            try:
-                await channel.fetch_message(thread_model.download_panel_message_id)
-                return
-            except discord.NotFound:
-                logger.warning(
-                    "帖子 %s 的下载入口消息已不存在，将重新创建。", channel.id
-                )
-            except discord.Forbidden:
-                logger.warning("Bot 无权检查帖子 %s 的下载入口消息。", channel.id)
-                return
-
-        message = await channel.send(
-            embed=build_download_entry_embed(), view=DownloadEntryView()
-        )
-        await self.thread_repo.update(
-            session,
-            db_obj=thread_model,
-            obj_in={"download_panel_message_id": message.id},
-        )
-
-        try:
-            await message.pin(reason="固定 Odysseia Protect 下载入口")
-        except discord.Forbidden:
-            logger.warning("Bot 无权置顶帖子 %s 的下载入口消息。", channel.id)
-        except discord.HTTPException as exc:
-            logger.warning("置顶帖子 %s 的下载入口消息失败: %s", channel.id, exc)
 
     async def create_download_view(
         self, session: AsyncSession, *, public_thread_id: int

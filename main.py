@@ -21,7 +21,6 @@ from src.database.repositories.user import UserRepository
 from src.services.upload_service import UploadService
 from src.services.download_service import DownloadService
 from src.services.management_service import ManagementService
-from src.ui.download_entry_ui import DownloadEntryView
 # from src.services.reaction_wall_service import ReactionWallService
 
 
@@ -93,9 +92,6 @@ class OdysseiaProtect(commands.Bot):
         logger.info("正在初始化数据库...")
         await init_db()
         logger.info("数据库初始化完成。")
-
-        # 每次启动都重新注册，既有消息上的常驻按钮才能继续响应。
-        self.add_view(DownloadEntryView())
 
         # 动态加载 Cogs
         logger.info("开始加载 Cogs...")

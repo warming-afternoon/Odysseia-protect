@@ -30,7 +30,6 @@ class TestIntegration:
         resource_repo = ResourceRepository()
         user_repo = UserRepository()
         mock_bot = MagicMock()
-        mock_bot.download_service.ensure_download_entry = AsyncMock()
         upload_service = UploadService(
             bot=mock_bot,
             resource_repo=resource_repo,
@@ -99,6 +98,7 @@ class TestIntegration:
             )
             # 期望返回成功消息
             assert "成功" in result or "✅" in result
+            mock_channel.send.assert_not_called()
 
         # 5. 验证资源已创建
         resources = await resource_repo.get_by_thread_id(
@@ -132,6 +132,36 @@ class TestIntegration:
 
         # 8. 清理（可选）
         # 测试通过
+
+    async def test_secure_upload_does_not_create_public_download_entry(
+        self, db_session: AsyncSession
+    ):
+        """受保护上传完成后不再向公开帖子发送固定下载入口。"""
+        mock_bot = MagicMock()
+        service = UploadService(
+            bot=mock_bot,
+            resource_repo=MagicMock(),
+            thread_repo=MagicMock(),
+            user_repo=MagicMock(),
+        )
+        thread_model = MagicMock()
+        interaction = MagicMock()
+        interaction.channel = MagicMock(spec=discord.Thread)
+        service._get_or_create_thread = AsyncMock(return_value=thread_model)
+        service._handle_secure_upload_submission_from_attachments = AsyncMock(
+            return_value="✅ 上传成功"
+        )
+
+        result = await service.handle_secure_upload_submission_from_message(
+            db_session,
+            interaction=interaction,
+            attachments=[MagicMock(spec=discord.Attachment)],
+            version_info="v1",
+            password=None,
+        )
+
+        assert result == "✅ 上传成功"
+        interaction.channel.send.assert_not_called()
 
     async def test_non_author_is_rejected_before_upload(
         self, db_session: AsyncSession
