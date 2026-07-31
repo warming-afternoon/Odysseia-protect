@@ -18,9 +18,11 @@ from src.database import init_db
 from src.database.repositories.resource import ResourceRepository
 from src.database.repositories.thread import ThreadRepository
 from src.database.repositories.user import UserRepository
+from src.database.repositories.wishlist import WishlistRepository
 from src.services.upload_service import UploadService
 from src.services.download_service import DownloadService
 from src.services.management_service import ManagementService
+from src.services.wishlist_service import WishlistService
 # from src.services.reaction_wall_service import ReactionWallService
 
 
@@ -71,12 +73,20 @@ class OdysseiaProtect(commands.Bot):
         thread_repo = ThreadRepository()
         resource_repo = ResourceRepository()
         user_repo = UserRepository()
+        wishlist_repo = WishlistRepository()
         self.upload_service = UploadService(self, resource_repo, thread_repo, user_repo)
         self.download_service = DownloadService(
             self, resource_repo, thread_repo, user_repo
         )
         self.management_service = ManagementService(
             self, resource_repo, thread_repo, user_repo
+        )
+        self.wishlist_service = WishlistService(
+            self,
+            resource_repo,
+            thread_repo,
+            user_repo,
+            wishlist_repo,
         )
 
     #       self.reaction_wall_service = ReactionWallService(

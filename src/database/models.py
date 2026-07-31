@@ -5,9 +5,11 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -78,6 +80,9 @@ class Resource(Base):
     # --- 关系 ---
     # 多个 Resource 属于一个 Thread
     thread: Mapped["Thread"] = relationship("Thread", back_populates="resources")
+    wishlist_items: Mapped[list["WishlistItem"]] = relationship(
+        "WishlistItem", back_populates="resource", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<Resource(id={self.id}, version='{self.version_info}', filename='{self.filename}')>"
@@ -96,7 +101,49 @@ class User(Base):
     has_agreed_to_privacy_policy: Mapped[bool] = mapped_column(
         default=False, nullable=False
     )
+    has_agreed_to_wishlist_policy: Mapped[bool] = mapped_column(
+        default=False, nullable=False
+    )
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=func.now())
+    wishlist_items: Mapped[list["WishlistItem"]] = relationship(
+        "WishlistItem", back_populates="user", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<User(id={self.id}, has_agreed={self.has_agreed_to_privacy_policy})>"
+
+
+class WishlistItem(Base):
+    """用户收藏的具体资源版本。"""
+
+    __tablename__ = "wishlist_items"
+    __table_args__ = (
+        UniqueConstraint("user_id", "resource_id", name="uq_wishlist_user_resource"),
+        Index("ix_wishlist_user_created", "user_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    resource_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("resources.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=func.now(), nullable=False
+    )
+
+    user: Mapped["User"] = relationship("User", back_populates="wishlist_items")
+    resource: Mapped["Resource"] = relationship(
+        "Resource", back_populates="wishlist_items"
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<WishlistItem(id={self.id}, user_id={self.user_id}, "
+            f"resource_id={self.resource_id})>"
+        )

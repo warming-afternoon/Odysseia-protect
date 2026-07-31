@@ -25,8 +25,9 @@ class PrivacyPolicyView(discord.ui.View):
         user_repo: UserRepository,
         service: "UploadService",
         mode: str,
-        file: Optional[discord.Attachment],
+        file: Optional[Union[discord.Attachment, List[discord.Attachment]]],
         message_link: Optional[str],
+        source_message: Optional[discord.Message] = None,
     ):
         super().__init__(timeout=300)  # 5分钟后超时
         self.user_repo = user_repo
@@ -34,6 +35,7 @@ class PrivacyPolicyView(discord.ui.View):
         self.mode = mode
         self.file = file
         self.message_link = message_link
+        self.source_message = source_message
 
     @discord.ui.button(label="同意", style=discord.ButtonStyle.success)
     async def agree(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -53,6 +55,7 @@ class PrivacyPolicyView(discord.ui.View):
             modal = SecureUploadModal(
                 service=self.service,
                 files=self.file,
+                source_message=self.source_message,
             )
         else:  # normal mode
             modal = NormalUploadModal(

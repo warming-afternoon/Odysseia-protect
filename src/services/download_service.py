@@ -83,9 +83,9 @@ class DownloadService(BaseService):
             name = "📄 资源" if i == 0 else "📄 资源 (续)"
             embed.add_field(name=name, value=chunk, inline=False)
 
-        # 只将受保护的资源传递给下拉菜单视图
+        # 普通和受保护资源都进入版本下拉框；Discord 单个下拉框最多 25 项。
         view = ResourceSelectView(
-            secure_resources,
+            resources,
             resource_list_embed=embed,
         )
         return {"embed": embed, "view": view}
@@ -137,7 +137,10 @@ class DownloadService(BaseService):
 
     async def fetch_fresh_url(self, resource: ResourceDTO) -> str:
         """根据源消息动态获取当前有效的 Discord 附件 URL。"""
-        channel_id = resource.warehouse_thread_id or resource.public_thread_id
+        if resource.upload_mode == UploadMode.NORMAL:
+            channel_id = resource.public_thread_id
+        else:
+            channel_id = resource.warehouse_thread_id or resource.public_thread_id
         if not channel_id:
             raise ValueError("数据库中未找到该资源关联的频道ID。")
 

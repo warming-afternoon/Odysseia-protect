@@ -9,7 +9,7 @@ from typing import Any, Optional, Union
 import discord
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.config import PRIVACY_POLICY_TEXT
+from src.config import UPLOAD_PRIVACY_POLICY_TEXT
 from src.database.models import UploadMode
 from src.database.schemas import ResourceCreate, ThreadCreate, UserCreate
 from src.services.base import BaseService
@@ -88,8 +88,8 @@ class UploadService(BaseService):
             logger.info(f"用户 {author.id} 尚未同意隐私协议，将向其显示协议。")
             await session.commit()
             embed = discord.Embed(
-                title="📜 请阅读并同意隐私协议",
-                description=PRIVACY_POLICY_TEXT,
+                title="📤 请阅读并同意资源上传与数据存储协议",
+                description=UPLOAD_PRIVACY_POLICY_TEXT,
                 color=discord.Color.blue(),
             )
             view = PrivacyPolicyView(
@@ -98,6 +98,7 @@ class UploadService(BaseService):
                 mode=mode,
                 file=file,
                 message_link=message_link,
+                source_message=None,
             )
             return {"embed": embed, "view": view}
 
@@ -117,7 +118,29 @@ class UploadService(BaseService):
     ) -> Union[dict[str, Any], SecureUploadModal]:
         """从消息上下文菜单开始受保护文件的上传流程，返回一个模态框。"""
 
-        # 对于上下文菜单，我们跳过隐私协议检查，直接返回模态框
+        user = await self._get_or_create_user(
+            session,
+            user_id=interaction.user.id,
+        )
+        if not user.has_agreed_to_privacy_policy:
+            await session.commit()
+            embed = discord.Embed(
+                title="📤 请阅读并同意资源上传与数据存储协议",
+                description=UPLOAD_PRIVACY_POLICY_TEXT,
+                color=discord.Color.blue(),
+            )
+            return {
+                "embed": embed,
+                "view": PrivacyPolicyView(
+                    user_repo=self.user_repo,
+                    service=self,
+                    mode="secure",
+                    file=message.attachments,
+                    message_link=None,
+                    source_message=message,
+                ),
+            }
+
         return SecureUploadModal(
             service=self, files=message.attachments, source_message=message
         )

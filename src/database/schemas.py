@@ -44,6 +44,7 @@ class ThreadInDB(ThreadBase):
 class UserBase(BaseModel):
     id: int
     has_agreed_to_privacy_policy: bool = False
+    has_agreed_to_wishlist_policy: bool = False
 
 
 class UserCreate(UserBase):
@@ -51,7 +52,8 @@ class UserCreate(UserBase):
 
 
 class UserUpdate(BaseModel):
-    has_agreed_to_privacy_policy: bool
+    has_agreed_to_privacy_policy: Optional[bool] = None
+    has_agreed_to_wishlist_policy: Optional[bool] = None
 
 
 class UserInDB(UserBase):
@@ -85,6 +87,27 @@ class ResourceUpdate(BaseModel):
 
 
 class ResourceInDB(ResourceBase):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
+# ==================================
+# Wishlist Schemas
+# ==================================
+
+
+class WishlistItemCreate(BaseModel):
+    user_id: int
+    resource_id: int
+
+
+class WishlistItemUpdate(BaseModel):
+    pass
+
+
+class WishlistItemInDB(WishlistItemCreate):
     id: int
 
     class Config:

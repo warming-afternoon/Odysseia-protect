@@ -54,12 +54,12 @@ class ResourceSelect(discord.ui.Select):
         if not options:
             options.append(
                 discord.SelectOption(
-                    label="没有找到任何受保护的资源", value="disabled", default=True
+                    label="没有找到任何资源", value="disabled", default=True
                 )
             )
 
         super().__init__(
-            placeholder="请选择一个受保护的版本进行下载...",
+            placeholder="请选择一个资源版本进行下载...",
             min_values=1,
             max_values=1,
             options=options,
@@ -74,6 +74,10 @@ class ResourceSelect(discord.ui.Select):
         - 如果没有密码，则延迟响应，获取链接，然后发送结果。
         """
         selected_resource_id = int(self.values[0])
+        if self.view is not None and hasattr(
+            self.view, "clear_authorized_selection"
+        ):
+            self.view.clear_authorized_selection()
 
         async with AsyncSessionLocal() as session:
             resource_repo = ResourceRepository()
@@ -97,6 +101,7 @@ class ResourceSelect(discord.ui.Select):
             source_message_id=selected_resource.source_message_id,
             warehouse_thread_id=selected_resource.thread.warehouse_thread_id,
             public_thread_id=selected_resource.thread.public_thread_id,
+            upload_mode=selected_resource.upload_mode,
         )
 
         resource_list_embed = self.resource_list_embed
@@ -122,6 +127,11 @@ class ResourceSelect(discord.ui.Select):
                 panel_view=self.view,
             )
             await interaction.response.send_modal(modal)
+            if interaction.message:
+                try:
+                    await interaction.message.edit(view=self.view)
+                except discord.HTTPException:
+                    logger.warning("无法在密码验证前刷新心愿单按钮状态")
             return
 
         # 对于没有密码的资源
@@ -139,6 +149,11 @@ class ResourceSelect(discord.ui.Select):
             response_embed = download_service.build_download_embed(
                 resource_dto, fresh_url
             )
+            if hasattr(self.view, "authorize_selection"):
+                await self.view.authorize_selection(
+                    interaction,
+                    resource_id=selected_resource_id,
+                )
             await interaction.edit_original_response(
                 embeds=[response_embed, resource_list_embed],
                 view=self.view,

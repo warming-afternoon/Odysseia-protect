@@ -54,6 +54,11 @@ class PasswordModal(discord.ui.Modal, title="请输入下载密码"):
             interaction.client.dispatch("resource_downloaded", self.resource)
 
             embed = download_service.build_download_embed(self.resource, fresh_url)
+            if hasattr(self.panel_view, "authorize_selection"):
+                await self.panel_view.authorize_selection(
+                    interaction,
+                    resource_id=self.resource.id,
+                )
             await interaction.edit_original_response(
                 embeds=[embed, self.resource_list_embed],
                 view=self.panel_view,

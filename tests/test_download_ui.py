@@ -60,9 +60,29 @@ def make_resource(
     )
 
 
+@pytest.mark.asyncio
+async def test_download_select_includes_normal_and_secure_resources():
+    secure = make_resource(1, version="secure")
+    normal = make_resource(2, version="normal")
+    normal.upload_mode = UploadMode.NORMAL
+
+    view = ResourceSelectView([secure, normal])
+    select = view.children[0]
+
+    assert len(select.options) == 2
+    assert select.options[0].label.startswith("🔒")
+    assert select.options[1].label.startswith("📄")
+    assert view.children[1].label == "加入心愿单"
+    assert view.children[1].disabled is True
+    assert view.children[2].label == "从心愿单中移除"
+    assert view.children[2].disabled is True
+
+
 def make_interaction(download_service: MagicMock) -> SimpleNamespace:
     client = MagicMock()
     client.download_service = download_service
+    client.wishlist_service = MagicMock()
+    client.wishlist_service.is_wishlisted = AsyncMock(return_value=False)
     client.dispatch = MagicMock()
     return SimpleNamespace(
         response=SimpleNamespace(
@@ -73,6 +93,7 @@ def make_interaction(download_service: MagicMock) -> SimpleNamespace:
         followup=SimpleNamespace(send=AsyncMock()),
         edit_original_response=AsyncMock(),
         client=client,
+        user=SimpleNamespace(id=123),
         message=None,
     )
 

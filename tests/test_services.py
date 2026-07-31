@@ -52,7 +52,7 @@ class TestUploadService:
         assert isinstance(result, dict)
         assert "embed" in result
         assert "view" in result
-        assert result["embed"].title == "📜 请阅读并同意隐私协议"
+        assert result["embed"].title == "📤 请阅读并同意资源上传与数据存储协议"
         # 验证用户已创建但未同意
         user = await user_repo.get(db_session, id=111222)
         assert user is not None

@@ -244,8 +244,13 @@ async def setup(bot: "OdysseiaProtect"):
             elif isinstance(result, dict):
                 # 如果返回字典，说明是权限错误
                 embed = result.get("embed")
+                view = result.get("view")
                 if embed:
-                    await interaction.response.send_message(embed=embed, ephemeral=True)
+                    await interaction.response.send_message(
+                        embed=embed,
+                        view=view,
+                        ephemeral=True,
+                    )
                 else:
                     await interaction.response.send_message(
                         "发生未知错误。", ephemeral=True
