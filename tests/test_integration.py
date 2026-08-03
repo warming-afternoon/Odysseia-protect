@@ -13,6 +13,7 @@ from src.database.repositories.thread import ThreadRepository
 from src.database.repositories.user import UserRepository
 from src.database.schemas import ThreadCreate, UserCreate
 from src.database.models import UploadMode
+from src.enums import SourceStatus
 from src.services.upload_service import UploadService
 from src.services.download_service import DownloadService
 from src.services.management_service import ManagementService
@@ -99,6 +100,15 @@ class TestIntegration:
             # 期望返回成功消息
             assert "成功" in result or "✅" in result
             mock_channel.send.assert_not_called()
+
+        refreshed_thread = await thread_repo.get_by_public_thread_id(
+            db_session,
+            public_thread_id=12345,
+        )
+        assert refreshed_thread is not None
+        assert refreshed_thread.guild_id == 111
+        assert refreshed_thread.public_thread_name == "Test Thread"
+        assert refreshed_thread.source_status == SourceStatus.ACTIVE
 
         # 5. 验证资源已创建
         resources = await resource_repo.get_by_thread_id(

@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.config import UPLOAD_PRIVACY_POLICY_TEXT
 from src.database.models import UploadMode
 from src.database.schemas import ResourceCreate, ThreadCreate, UserCreate
+from src.enums import SourceStatus
 from src.services.base import BaseService
 from src.ui.upload_ui import PrivacyPolicyView, NormalUploadModal, SecureUploadModal
 from src.utils.discord_utils import parse_message_link
@@ -42,17 +43,33 @@ class UploadService(BaseService):
             session, public_thread_id=interaction.channel.id
         )
 
+        guild = interaction.guild or getattr(interaction.channel, "guild", None)
+        guild_id = guild.id if guild is not None else None
+        channel_name = getattr(interaction.channel, "name", None)
+        source_name = str(channel_name)[:100] if channel_name else None
+
         if not thread_model:
             logger.info(f"帖子 {interaction.channel.id} 不存在，将创建新记录。")
             author_id = interaction.user.id
             thread_data = ThreadCreate(
                 public_thread_id=interaction.channel.id,
                 author_id=author_id,
+                guild_id=guild_id,
+                public_thread_name=source_name,
+                source_status=SourceStatus.ACTIVE,
                 warehouse_thread_id=None,
             )
             thread_model = await self.thread_repo.create(session, obj_in=thread_data)
             await session.flush()
             logger.info(f"已为帖子 {interaction.channel.id} 创建数据库记录。")
+        else:
+            await self.thread_repo.update_source_metadata(
+                session,
+                public_thread_id=interaction.channel.id,
+                guild_id=guild_id,
+                public_thread_name=source_name,
+                source_status=SourceStatus.ACTIVE,
+            )
 
         return thread_model
 

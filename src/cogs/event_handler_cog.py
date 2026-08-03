@@ -16,6 +16,7 @@ from src.database.repositories.resource import ResourceRepository
 from src.database.repositories.thread import ThreadRepository
 from src.database.repositories.user import UserRepository
 from src.services.download_service import DownloadService
+from src.enums import SourceStatus
 
 if TYPE_CHECKING:
     from main import OdysseiaProtect
@@ -33,6 +34,80 @@ class EventHandlerCog(commands.Cog):
             resource_repo=ResourceRepository(),
             thread_repo=ThreadRepository(),
             user_repo=UserRepository(),
+        )
+        self.thread_repo = ThreadRepository()
+
+    async def _update_source_metadata(
+        self,
+        *,
+        public_thread_id: int,
+        guild_id: int | None = None,
+        public_thread_name: str | None = None,
+        source_status: SourceStatus | None = None,
+    ) -> None:
+        try:
+            async with AsyncSessionLocal() as session:
+                async with session.begin():
+                    await self.thread_repo.update_source_metadata(
+                        session,
+                        public_thread_id=public_thread_id,
+                        guild_id=guild_id,
+                        public_thread_name=public_thread_name,
+                        source_status=source_status,
+                    )
+        except Exception:
+            logger.exception(
+                "同步来源帖子 %s 的元数据失败。",
+                public_thread_id,
+            )
+
+    @commands.Cog.listener()
+    async def on_raw_thread_update(
+        self,
+        payload: discord.RawThreadUpdateEvent,
+    ):
+        name = payload.data.get("name")
+        if not isinstance(name, str) or not name:
+            return
+        await self._update_source_metadata(
+            public_thread_id=payload.thread_id,
+            guild_id=payload.guild_id,
+            public_thread_name=name,
+            source_status=SourceStatus.ACTIVE,
+        )
+
+    @commands.Cog.listener()
+    async def on_raw_thread_delete(
+        self,
+        payload: discord.RawThreadDeleteEvent,
+    ):
+        await self._update_source_metadata(
+            public_thread_id=payload.thread_id,
+            guild_id=payload.guild_id,
+            source_status=SourceStatus.DELETED,
+        )
+
+    @commands.Cog.listener()
+    async def on_guild_channel_update(
+        self,
+        before: discord.abc.GuildChannel,
+        after: discord.abc.GuildChannel,
+    ):
+        if before.name == after.name:
+            return
+        await self._update_source_metadata(
+            public_thread_id=after.id,
+            guild_id=after.guild.id,
+            public_thread_name=after.name,
+            source_status=SourceStatus.ACTIVE,
+        )
+
+    @commands.Cog.listener()
+    async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
+        await self._update_source_metadata(
+            public_thread_id=channel.id,
+            guild_id=channel.guild.id,
+            source_status=SourceStatus.DELETED,
         )
 
     @commands.Cog.listener()

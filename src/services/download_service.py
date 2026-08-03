@@ -162,7 +162,7 @@ class DownloadService(BaseService):
                 f"**版本：** {resource.version_info}\n"
                 f"**文件：** `{resource.filename or '未命名文件'}`\n\n"
                 "📋 **SillyTavern 快速导入 URL**\n"
-                f"`{fresh_url}`\n\n"
+                f"```\n{fresh_url}\n```\n"
                 f"[🌐 打开下载链接]({fresh_url})\n\n"
                 "链接具有时效性；失效后请重新打开下载面板获取。"
             ),

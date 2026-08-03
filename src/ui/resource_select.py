@@ -101,6 +101,10 @@ class ResourceSelect(discord.ui.Select):
             source_message_id=selected_resource.source_message_id,
             warehouse_thread_id=selected_resource.thread.warehouse_thread_id,
             public_thread_id=selected_resource.thread.public_thread_id,
+            author_id=selected_resource.thread.author_id,
+            guild_id=selected_resource.thread.guild_id,
+            public_thread_name=selected_resource.thread.public_thread_name,
+            source_status=selected_resource.thread.source_status,
             upload_mode=selected_resource.upload_mode,
         )
 

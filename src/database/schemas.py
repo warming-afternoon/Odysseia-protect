@@ -2,6 +2,8 @@ from typing import Optional
 
 from pydantic import BaseModel
 
+from src.enums import SourceStatus
+
 from .models import UploadMode
 
 # ==================================
@@ -12,6 +14,9 @@ from .models import UploadMode
 class ThreadBase(BaseModel):
     public_thread_id: int
     author_id: int
+    guild_id: Optional[int] = None
+    public_thread_name: Optional[str] = None
+    source_status: SourceStatus = SourceStatus.UNKNOWN
     warehouse_thread_id: Optional[int] = None
     download_panel_message_id: Optional[int] = None
     # reaction_required: bool = False
@@ -23,6 +28,9 @@ class ThreadCreate(ThreadBase):
 
 
 class ThreadUpdate(BaseModel):
+    guild_id: Optional[int] = None
+    public_thread_name: Optional[str] = None
+    source_status: Optional[SourceStatus] = None
     warehouse_thread_id: Optional[int] = None
     download_panel_message_id: Optional[int] = None
     # reaction_required: Optional[bool] = None

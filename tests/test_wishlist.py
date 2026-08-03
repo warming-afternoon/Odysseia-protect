@@ -15,6 +15,7 @@ from src.database.repositories.user import UserRepository
 from src.database.repositories.wishlist import WishlistRepository
 from src.database.schemas import ResourceCreate, ThreadCreate, UserCreate
 from src.dto.resource_dto import ResourceDTO
+from src.enums import SourceStatus
 from src.services.wishlist_service import (
     WishlistPage,
     WishlistPageEntry,
@@ -37,6 +38,9 @@ async def create_resource(
             public_thread_id=10000 + resource_id_seed,
             warehouse_thread_id=20000 + resource_id_seed,
             author_id=999,
+            guild_id=80000 + resource_id_seed,
+            public_thread_name=f"来源帖子 {resource_id_seed}",
+            source_status=SourceStatus.ACTIVE,
         ),
     )
     await session.flush()
@@ -301,6 +305,10 @@ def make_page_entry(index: int, url: str | None) -> WishlistPageEntry:
             version_info=f"v{index}",
             source_message_id=100 + index,
             public_thread_id=200 + index,
+            author_id=400 + index,
+            guild_id=300,
+            public_thread_name=f"来源帖子 {index}",
+            source_status=SourceStatus.ACTIVE,
             upload_mode=UploadMode.NORMAL,
         ),
         created_at=datetime(2026, 1, 1),
@@ -316,6 +324,29 @@ def test_wishlist_consent_uses_audience_specific_policy():
     assert "收藏者" in embed.description
     assert "资源版本 ID" in embed.description
     assert "受保护文件" not in embed.description
+
+
+@pytest.mark.asyncio
+async def test_deleted_source_keeps_clickable_title_and_warning():
+    entry = make_page_entry(1, "https://example.com/1.png")
+    entry.resource.source_status = SourceStatus.DELETED
+    render = build_wishlist_render(
+        service=MagicMock(),
+        user_id=123,
+        page_data=WishlistPage(entries=[entry], page=1, max_page=1, total=1),
+    )
+    text = "\n".join(
+        item.content
+        for item in render.view.walk_children()
+        if isinstance(item, discord.ui.TextDisplay)
+    )
+
+    assert "[来源帖子 1](https://discord.com/channels/300/201)" in text
+    assert (
+        "### [来源帖子 1](https://discord.com/channels/300/201)\n"
+        "⚠️ **原帖已删除**\n"
+        "**作者：** <@401>"
+    ) in text
 
 
 @pytest.mark.asyncio
@@ -339,7 +370,13 @@ async def test_wishlist_v2_page_uses_exact_component_budget_and_copy_block():
         if isinstance(item, discord.ui.TextDisplay)
     )
     assert "https://example.com/1.png" in text
-    assert "```\n" in text
+    assert "### [来源帖子 1](https://discord.com/channels/300/201)" in text
+    assert "**作者：** <@401>" in text
+    assert "角色卡下载" not in text
+    # 八个单项 URL 和一个本页汇总代码块都应支持 Discord 一键复制。
+    for index in range(1, 9):
+        assert f"```\nhttps://example.com/{index}.png\n```" in text
+    assert text.count("```") == 18
     assert "1/2" in [
         item.label
         for item in render.view.walk_children()

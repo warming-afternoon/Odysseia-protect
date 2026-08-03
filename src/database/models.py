@@ -15,6 +15,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
+from src.enums import SourceStatus
 
 
 class UploadMode(enum.Enum):
@@ -33,6 +34,20 @@ class Thread(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     public_thread_id: Mapped[int] = mapped_column(
         BigInteger, unique=True, nullable=False, index=True
+    )
+    guild_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    public_thread_name: Mapped[str | None] = mapped_column(
+        String(100), nullable=True
+    )
+    source_status: Mapped[SourceStatus] = mapped_column(
+        Enum(
+            SourceStatus,
+            values_callable=lambda enum_cls: [item.value for item in enum_cls],
+            native_enum=False,
+        ),
+        default=SourceStatus.UNKNOWN,
+        server_default=SourceStatus.UNKNOWN.value,
+        nullable=False,
     )
     warehouse_thread_id: Mapped[int | None] = mapped_column(
         BigInteger, unique=True, nullable=True

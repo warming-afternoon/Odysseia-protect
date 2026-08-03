@@ -7,7 +7,7 @@ import discord
 
 from src.config import WISHLIST_POLICY_TEXT
 from src.database.database import AsyncSessionLocal
-from src.database.models import UploadMode
+from src.enums import SourceStatus
 
 if TYPE_CHECKING:
     from src.services.wishlist_service import WishlistPage, WishlistService
@@ -116,22 +116,41 @@ def _resource_card(
     include_raw_url: bool,
 ) -> discord.ui.Container:
     resource = entry.resource
-    mode_icon = "🔒" if resource.upload_mode == UploadMode.SECURE else "📄"
     version = discord.utils.escape_markdown(resource.version_info or "未命名")
     filename = discord.utils.escape_markdown(resource.filename or "未命名文件")
+    source_name = resource.public_thread_name or (
+        f"未知帖子（ID: {resource.public_thread_id}）"
+    )
+    source_label = discord.utils.escape_markdown(source_name).replace(
+        "]", "\\]"
+    )
+    if resource.public_thread_name and resource.guild_id:
+        source_url = (
+            "https://discord.com/channels/"
+            f"{resource.guild_id}/{resource.public_thread_id}"
+        )
+        source_heading = f"### [{source_label}]({source_url})"
+    else:
+        source_heading = f"### {source_label}"
 
-    lines = [
-        f"### {mode_icon} 角色卡下载",
-        f"**版本：** {version}",
-        f"**文件：** `{filename}`",
-    ]
+    lines = [source_heading]
+    if resource.source_status == SourceStatus.DELETED:
+        lines.append("⚠️ **原帖已删除**")
+    author = f"<@{resource.author_id}>" if resource.author_id else "未知作者"
+    lines.extend(
+        [
+            f"**作者：** {author}",
+            f"**版本：** {version}",
+            f"**文件：** `{filename}`",
+        ]
+    )
     if entry.url:
         if include_raw_url:
             lines.extend(
                 [
                     "",
                     "📋 **SillyTavern 快速导入 URL**",
-                    f"`{entry.url}`",
+                    f"```\n{entry.url}\n```",
                 ]
             )
         if len(entry.url) <= 512:

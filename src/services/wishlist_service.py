@@ -154,6 +154,10 @@ class WishlistService(BaseService):
             source_message_id=resource.source_message_id,
             warehouse_thread_id=resource.thread.warehouse_thread_id,
             public_thread_id=resource.thread.public_thread_id,
+            author_id=resource.thread.author_id,
+            guild_id=resource.thread.guild_id,
+            public_thread_name=resource.thread.public_thread_name,
+            source_status=resource.thread.source_status,
             upload_mode=resource.upload_mode,
         )
 

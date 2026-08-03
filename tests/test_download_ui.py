@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 from src.database.models import UploadMode
+from src.enums import SourceStatus
 from src.dto.resource_dto import ResourceDTO
 from src.services.download_service import DownloadService
 from src.ui.password_input_modal import PasswordModal
@@ -23,6 +24,7 @@ def test_download_embed_exposes_copyable_url_and_png_preview():
     embed = DownloadService.build_download_embed(resource, url)
 
     assert url in (embed.description or "")
+    assert f"```\n{url}\n```" in (embed.description or "")
     assert embed.image.url == url
 
 
@@ -56,6 +58,10 @@ def make_resource(
         thread=SimpleNamespace(
             warehouse_thread_id=200,
             public_thread_id=300,
+            author_id=500,
+            guild_id=400,
+            public_thread_name="来源帖子",
+            source_status=SourceStatus.ACTIVE,
         ),
     )
 
