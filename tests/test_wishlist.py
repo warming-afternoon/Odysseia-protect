@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import discord
 import pytest
@@ -17,6 +17,7 @@ from src.database.schemas import ResourceCreate, ThreadCreate, UserCreate
 from src.dto.resource_dto import ResourceDTO
 from src.enums import SourceStatus
 from src.services.wishlist_service import (
+    WISHLIST_PAGE_SIZE,
     WishlistPage,
     WishlistPageEntry,
     WishlistService,
@@ -101,7 +102,63 @@ async def test_wishlist_repository_is_idempotent_and_user_scoped(
 
 
 @pytest.mark.asyncio
-async def test_wishlist_repository_orders_newest_and_paginates_eight(
+async def test_wishlist_repository_bulk_remove_is_item_and_user_scoped(
+    db_session: AsyncSession,
+):
+    user_repo = UserRepository()
+    wishlist_repo = WishlistRepository()
+    resources = [
+        await create_resource(db_session, resource_id_seed=index)
+        for index in range(11, 13)
+    ]
+    for user_id in (101, 202):
+        await user_repo.create(
+            db_session,
+            obj_in=UserCreate(
+                id=user_id,
+                has_agreed_to_privacy_policy=True,
+                has_agreed_to_wishlist_policy=True,
+            ),
+        )
+    await db_session.flush()
+    for resource in resources:
+        await wishlist_repo.add_idempotent(
+            db_session,
+            user_id=101,
+            resource_id=resource.id,
+        )
+    await wishlist_repo.add_idempotent(
+        db_session,
+        user_id=202,
+        resource_id=resources[0].id,
+    )
+    await db_session.flush()
+
+    user_items = await wishlist_repo.get_page_for_user(
+        db_session,
+        user_id=101,
+        offset=0,
+        limit=10,
+    )
+    other_items = await wishlist_repo.get_page_for_user(
+        db_session,
+        user_id=202,
+        offset=0,
+        limit=10,
+    )
+    removed = await wishlist_repo.remove_items_for_user(
+        db_session,
+        user_id=101,
+        item_ids=(user_items[0].id, other_items[0].id, user_items[0].id),
+    )
+
+    assert removed == 1
+    assert await wishlist_repo.count_for_user(db_session, user_id=101) == 1
+    assert await wishlist_repo.count_for_user(db_session, user_id=202) == 1
+
+
+@pytest.mark.asyncio
+async def test_wishlist_repository_orders_newest_and_paginates_six(
     db_session: AsyncSession,
 ):
     user_repo = UserRepository()
@@ -131,18 +188,17 @@ async def test_wishlist_repository_orders_newest_and_paginates_eight(
     await db_session.flush()
 
     first_page = await wishlist_repo.get_page_for_user(
-        db_session, user_id=101, offset=0, limit=8
+        db_session, user_id=101, offset=0, limit=6
     )
     second_page = await wishlist_repo.get_page_for_user(
-        db_session, user_id=101, offset=8, limit=8
+        db_session, user_id=101, offset=6, limit=6
     )
 
     assert [item.resource_id for item in first_page] == [
-        resource.id for resource in reversed(resources[2:])
+        resource.id for resource in reversed(resources[4:])
     ]
     assert [item.resource_id for item in second_page] == [
-        resources[1].id,
-        resources[0].id,
+        resource.id for resource in reversed(resources[:4])
     ]
 
 
@@ -296,6 +352,81 @@ async def test_wishlist_service_marks_only_failed_url_unavailable(
     bot.dispatch.assert_not_called()
 
 
+@pytest.mark.asyncio
+async def test_wishlist_service_uses_six_items_and_clamps_after_last_page_delete(
+    db_session: AsyncSession,
+):
+    user_repo = UserRepository()
+    wishlist_repo = WishlistRepository()
+    await user_repo.create(
+        db_session,
+        obj_in=UserCreate(
+            id=123,
+            has_agreed_to_privacy_policy=True,
+            has_agreed_to_wishlist_policy=True,
+        ),
+    )
+    resources = [
+        await create_resource(db_session, resource_id_seed=index)
+        for index in range(21, 28)
+    ]
+    await db_session.flush()
+    for resource in resources:
+        await wishlist_repo.add_idempotent(
+            db_session,
+            user_id=123,
+            resource_id=resource.id,
+        )
+    await db_session.flush()
+
+    bot = MagicMock()
+    bot.download_service.fetch_fresh_url = AsyncMock(
+        return_value="https://example.com/card.png"
+    )
+    service = WishlistService(
+        bot,
+        ResourceRepository(),
+        ThreadRepository(),
+        user_repo,
+        wishlist_repo,
+    )
+    last_page = await service.get_page(db_session, user_id=123, page=2)
+
+    assert WISHLIST_PAGE_SIZE == 6
+    assert last_page.page == 2
+    assert len(last_page.entries) == 1
+
+    await service.remove_items(
+        db_session,
+        user_id=123,
+        item_ids=(last_page.entries[0].item_id,),
+    )
+    refreshed = await service.get_page(db_session, user_id=123, page=2)
+
+    assert refreshed.page == 1
+    assert refreshed.max_page == 1
+    assert refreshed.total == 6
+    assert len(refreshed.entries) == 6
+
+    remaining_ids = tuple(entry.item_id for entry in refreshed.entries)
+    assert await service.remove_items(
+        db_session,
+        user_id=123,
+        item_ids=remaining_ids,
+    ) == 6
+    assert await service.remove_items(
+        db_session,
+        user_id=123,
+        item_ids=remaining_ids,
+    ) == 0
+    empty_page = await service.get_page(db_session, user_id=123, page=1)
+
+    assert empty_page.page == 1
+    assert empty_page.max_page == 1
+    assert empty_page.total == 0
+    assert empty_page.entries == []
+
+
 def make_page_entry(index: int, url: str | None) -> WishlistPageEntry:
     return WishlistPageEntry(
         item_id=index,
@@ -353,7 +484,7 @@ async def test_deleted_source_keeps_clickable_title_and_warning():
 async def test_wishlist_v2_page_uses_exact_component_budget_and_copy_block():
     entries = [
         make_page_entry(index, f"https://example.com/{index}.png")
-        for index in range(1, 9)
+        for index in range(1, 7)
     ]
     render = build_wishlist_render(
         service=MagicMock(),
@@ -373,15 +504,151 @@ async def test_wishlist_v2_page_uses_exact_component_budget_and_copy_block():
     assert "### [来源帖子 1](https://discord.com/channels/300/201)" in text
     assert "**作者：** <@401>" in text
     assert "角色卡下载" not in text
-    # 八个单项 URL 和一个本页汇总代码块都应支持 Discord 一键复制。
-    for index in range(1, 9):
+    # 六个单项 URL 和一个本页汇总代码块都应支持 Discord 一键复制。
+    for index in range(1, 7):
         assert f"```\nhttps://example.com/{index}.png\n```" in text
-    assert text.count("```") == 18
-    assert "1/2" in [
+    assert text.count("```") == 14
+    button_labels = [
         item.label
         for item in render.view.walk_children()
         if isinstance(item, discord.ui.Button)
     ]
+    assert "1/2" in button_labels
+    assert button_labels.count("移除") == 6
+    assert "移除本页全部项" in button_labels
+
+
+@pytest.mark.asyncio
+async def test_wishlist_cards_keep_remove_enabled_for_all_download_states():
+    entries = [
+        make_page_entry(1, "https://example.com/normal.png"),
+        make_page_entry(2, "https://example.com/" + ("x" * 513)),
+        make_page_entry(3, None),
+    ]
+    render = build_wishlist_render(
+        service=MagicMock(),
+        user_id=123,
+        page_data=WishlistPage(entries=entries, page=1, max_page=1, total=3),
+    )
+    buttons = [
+        item
+        for item in render.view.walk_children()
+        if isinstance(item, discord.ui.Button)
+    ]
+
+    remove_buttons = [button for button in buttons if button.label == "移除"]
+    assert len(remove_buttons) == 3
+    assert all(not button.disabled for button in remove_buttons)
+    assert next(button for button in buttons if button.label == "打开下载链接")
+    assert next(button for button in buttons if button.label == "URL 见导出内容").disabled
+    assert next(button for button in buttons if button.label == "资源不可用").disabled
+
+
+@pytest.mark.asyncio
+async def test_remove_page_button_uses_rendered_item_id_snapshot():
+    service = MagicMock()
+    service.remove_items = AsyncMock(return_value=2)
+    replacement_view = MagicMock()
+    service.build_render = AsyncMock(
+        return_value=SimpleNamespace(view=replacement_view, file=None)
+    )
+    entries = [
+        make_page_entry(11, "https://example.com/11.png"),
+        make_page_entry(12, "https://example.com/12.png"),
+    ]
+    render = build_wishlist_render(
+        service=service,
+        user_id=123,
+        page_data=WishlistPage(entries=entries, page=2, max_page=3, total=14),
+    )
+    remove_page_button = next(
+        item
+        for item in render.view.walk_children()
+        if isinstance(item, discord.ui.Button)
+        and item.label == "移除本页全部项"
+    )
+    session = MagicMock()
+    session.commit = AsyncMock()
+    session.rollback = AsyncMock()
+    session_context = MagicMock()
+    session_context.__aenter__ = AsyncMock(return_value=session)
+    session_context.__aexit__ = AsyncMock(return_value=None)
+    interaction = SimpleNamespace(
+        response=SimpleNamespace(defer=AsyncMock()),
+        followup=SimpleNamespace(send=AsyncMock()),
+        edit_original_response=AsyncMock(),
+    )
+
+    with patch(
+        "src.ui.wishlist_ui.AsyncSessionLocal",
+        return_value=session_context,
+    ):
+        await remove_page_button.callback(interaction)
+
+    service.remove_items.assert_awaited_once_with(
+        session,
+        user_id=123,
+        item_ids=(11, 12),
+    )
+    service.build_render.assert_awaited_once_with(
+        session,
+        user_id=123,
+        page=2,
+    )
+    session.commit.assert_awaited_once()
+    session.rollback.assert_not_awaited()
+    interaction.edit_original_response.assert_awaited_once_with(
+        view=replacement_view,
+        attachments=[],
+    )
+
+
+@pytest.mark.asyncio
+async def test_single_remove_rolls_back_and_keeps_panel_on_database_error():
+    service = MagicMock()
+    service.remove = AsyncMock(side_effect=RuntimeError("database unavailable"))
+    service.build_render = AsyncMock()
+    render = build_wishlist_render(
+        service=service,
+        user_id=123,
+        page_data=WishlistPage(
+            entries=[make_page_entry(7, "https://example.com/7.png")],
+            page=1,
+            max_page=1,
+            total=1,
+        ),
+    )
+    remove_button = next(
+        item
+        for item in render.view.walk_children()
+        if isinstance(item, discord.ui.Button) and item.label == "移除"
+    )
+    session = MagicMock()
+    session.commit = AsyncMock()
+    session.rollback = AsyncMock()
+    session_context = MagicMock()
+    session_context.__aenter__ = AsyncMock(return_value=session)
+    session_context.__aexit__ = AsyncMock(return_value=None)
+    interaction = SimpleNamespace(
+        response=SimpleNamespace(defer=AsyncMock()),
+        followup=SimpleNamespace(send=AsyncMock()),
+        edit_original_response=AsyncMock(),
+    )
+
+    with patch(
+        "src.ui.wishlist_ui.AsyncSessionLocal",
+        return_value=session_context,
+    ):
+        await remove_button.callback(interaction)
+
+    session.rollback.assert_awaited_once()
+    session.commit.assert_not_awaited()
+    service.build_render.assert_not_awaited()
+    interaction.edit_original_response.assert_not_awaited()
+    interaction.followup.send.assert_awaited_once_with(
+        "❌ 移除心愿单项目时发生内部错误，请稍后重试。",
+        ephemeral=True,
+    )
 
 
 @pytest.mark.asyncio
@@ -401,7 +668,7 @@ async def test_wishlist_v2_overflow_falls_back_to_txt():
             created_at=datetime(2026, 1, 1),
             url=long_url,
         )
-        for index in range(1, 9)
+        for index in range(1, 7)
     ]
     render = build_wishlist_render(
         service=MagicMock(),

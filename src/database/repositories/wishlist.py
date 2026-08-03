@@ -1,6 +1,6 @@
 from typing import Sequence
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
@@ -79,6 +79,24 @@ class WishlistRepository(
             return False
         await session.delete(item)
         return True
+
+    async def remove_items_for_user(
+        self,
+        session: AsyncSession,
+        *,
+        user_id: int,
+        item_ids: Sequence[int],
+    ) -> int:
+        unique_item_ids = tuple(dict.fromkeys(item_ids))
+        if not unique_item_ids:
+            return 0
+
+        statement = delete(self.model).where(
+            self.model.user_id == user_id,
+            self.model.id.in_(unique_item_ids),
+        )
+        result = await session.execute(statement)
+        return int(result.rowcount or 0)
 
     async def count_for_user(self, session: AsyncSession, *, user_id: int) -> int:
         statement = (

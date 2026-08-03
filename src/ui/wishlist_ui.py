@@ -105,6 +105,73 @@ class WishlistView(discord.ui.LayoutView):
             attachments=attachments,
         )
 
+    async def _remove_and_refresh(
+        self,
+        interaction: discord.Interaction,
+        *,
+        resource_id: int | None = None,
+        item_ids: tuple[int, ...] = (),
+    ):
+        await interaction.response.defer()
+        try:
+            async with AsyncSessionLocal() as session:
+                try:
+                    if resource_id is not None:
+                        await self.service.remove(
+                            session,
+                            user_id=self.user_id,
+                            resource_id=resource_id,
+                        )
+                    else:
+                        await self.service.remove_items(
+                            session,
+                            user_id=self.user_id,
+                            item_ids=item_ids,
+                        )
+                    render = await self.service.build_render(
+                        session,
+                        user_id=self.user_id,
+                        page=self.page,
+                    )
+                    await session.commit()
+                except Exception:
+                    await session.rollback()
+                    raise
+        except Exception:
+            logger.exception("从心愿单移除项目失败")
+            await interaction.followup.send(
+                "❌ 移除心愿单项目时发生内部错误，请稍后重试。",
+                ephemeral=True,
+            )
+            return
+
+        attachments = [render.file] if render.file else []
+        await interaction.edit_original_response(
+            view=render.view,
+            attachments=attachments,
+        )
+        self.stop()
+
+    async def _remove_resource(
+        self,
+        interaction: discord.Interaction,
+        resource_id: int,
+    ):
+        await self._remove_and_refresh(
+            interaction,
+            resource_id=resource_id,
+        )
+
+    async def _remove_page_items(
+        self,
+        interaction: discord.Interaction,
+        item_ids: tuple[int, ...],
+    ):
+        await self._remove_and_refresh(
+            interaction,
+            item_ids=item_ids,
+        )
+
     async def on_timeout(self):
         # 私密交互令牌可能已经失效，不再尝试编辑消息。
         pass
@@ -113,6 +180,7 @@ class WishlistView(discord.ui.LayoutView):
 def _resource_card(
     entry,
     *,
+    view: WishlistView,
     include_raw_url: bool,
 ) -> discord.ui.Container:
     resource = entry.resource
@@ -154,30 +222,39 @@ def _resource_card(
                 ]
             )
         if len(entry.url) <= 512:
-            accessory = discord.ui.Button(
+            download_button = discord.ui.Button(
                 label="打开下载链接",
                 style=discord.ButtonStyle.link,
                 url=entry.url,
             )
         else:
-            accessory = discord.ui.Button(
+            download_button = discord.ui.Button(
                 label="URL 见导出内容",
                 style=discord.ButtonStyle.secondary,
                 disabled=True,
             )
     else:
         lines.extend(["", "⚠️ **资源不可用：** 源消息或附件已失效。"])
-        accessory = discord.ui.Button(
+        download_button = discord.ui.Button(
             label="资源不可用",
             style=discord.ButtonStyle.secondary,
             disabled=True,
         )
 
-    section = discord.ui.Section(
-        discord.ui.TextDisplay("\n".join(lines)),
-        accessory=accessory,
+    remove_button = discord.ui.Button(
+        label="移除",
+        style=discord.ButtonStyle.danger,
     )
-    return discord.ui.Container(section, accent_color=discord.Color.green())
+
+    async def remove_callback(interaction: discord.Interaction):
+        await view._remove_resource(interaction, resource.id)
+
+    remove_button.callback = remove_callback
+    return discord.ui.Container(
+        discord.ui.TextDisplay("\n".join(lines)),
+        discord.ui.ActionRow(download_button, remove_button),
+        accent_color=discord.Color.green(),
+    )
 
 
 def _pagination_row(
@@ -237,6 +314,22 @@ def _pagination_row(
     return discord.ui.ActionRow(first, previous, current, next_page, last)
 
 
+def _remove_page_row(
+    view: WishlistView,
+    item_ids: tuple[int, ...],
+) -> discord.ui.ActionRow:
+    remove_button = discord.ui.Button(
+        label="移除本页全部项",
+        style=discord.ButtonStyle.danger,
+    )
+
+    async def remove_callback(interaction: discord.Interaction):
+        await view._remove_page_items(interaction, item_ids)
+
+    remove_button.callback = remove_callback
+    return discord.ui.ActionRow(remove_button)
+
+
 def _build_view(
     *,
     service: "WishlistService",
@@ -269,6 +362,7 @@ def _build_view(
         view.add_item(
             _resource_card(
                 entry,
+                view=view,
                 include_raw_url=include_raw_urls,
             )
         )
@@ -299,6 +393,8 @@ def _build_view(
         view.add_item(discord.ui.File(overflow_file))
 
     view.add_item(_pagination_row(view))
+    item_ids = tuple(entry.item_id for entry in page_data.entries)
+    view.add_item(_remove_page_row(view, item_ids))
     return view
 
 
@@ -413,7 +509,7 @@ class WishlistConsentView(discord.ui.View):
             content=(
                 "✅ 已加入心愿单！\n"
                 "使用 `/心愿单`，或右键任意服务器消息 → Apps → “打开心愿单”查看。\n"
-                "每页最多 8 项，页末 URL 可一键复制并粘贴到 "
+                "每页最多 6 项，页末 URL 可一键复制并粘贴到 "
                 "SillyTavern 批量导入；链接失效后重新打开即可刷新。"
             ),
             embed=None,

@@ -3,7 +3,7 @@ import logging
 import math
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Sequence
 
 import discord
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,7 +19,7 @@ from src.services.base import BaseService
 
 logger = logging.getLogger(__name__)
 
-WISHLIST_PAGE_SIZE = 8
+WISHLIST_PAGE_SIZE = 6
 WishlistMutationResult = Literal[
     "added",
     "already_added",
@@ -142,6 +142,19 @@ class WishlistService(BaseService):
             resource_id=resource_id,
         )
         return "removed" if removed else "not_found"
+
+    async def remove_items(
+        self,
+        session: AsyncSession,
+        *,
+        user_id: int,
+        item_ids: Sequence[int],
+    ) -> int:
+        return await self.wishlist_repo.remove_items_for_user(
+            session,
+            user_id=user_id,
+            item_ids=item_ids,
+        )
 
     @staticmethod
     def _to_resource_dto(item: WishlistItem) -> ResourceDTO:
