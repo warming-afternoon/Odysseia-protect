@@ -10,6 +10,8 @@ services:
     command: ["python", "main.py"]
     volumes:
       - ./data:/app/data
+    networks:
+      - bot-bridge
 
   odysseia-protect-migrate:
     build:
@@ -23,3 +25,8 @@ services:
     command: ["python", "migrate.py"]
     volumes:
       - ./data:/app/data
+
+networks:
+  bot-bridge:
+    external: true
+    name: ${BOT_BRIDGE_NETWORK:-Odysseia-BOT}
