@@ -4,6 +4,7 @@
 """
 
 import logging
+from enum import Enum
 from typing import Any, Optional, Union
 
 import discord
@@ -12,10 +13,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.database.models import UploadMode
 from src.dto.resource_dto import ResourceDTO
 from src.services.base import BaseService
-from src.ui.resource_select_view import ResourceSelectView
+from src.ui.resource_select_view import PublicResourceSelectView, ResourceSelectView
 from src.utils.formatting import format_resource_list_chunks
 
 logger = logging.getLogger(__name__)
+
+
+class DownloadPanelMode(Enum):
+    """下载请求所构建的面板类型。"""
+
+    PRIVATE = "private"
+    PUBLIC_GATEWAY = "public_gateway"
 
 
 class DownloadService(BaseService):
@@ -26,6 +34,7 @@ class DownloadService(BaseService):
         session: AsyncSession,
         *,
         source: Union[discord.Interaction, discord.Message],
+        panel_mode: DownloadPanelMode = DownloadPanelMode.PRIVATE,
     ) -> dict[str, Any]:
         """处理 /下载 命令的请求，返回包含 Embed 和 View 的字典。"""
         if not source.channel or not isinstance(
@@ -84,10 +93,16 @@ class DownloadService(BaseService):
             embed.add_field(name=name, value=chunk, inline=False)
 
         # 普通和受保护资源都进入版本下拉框；Discord 单个下拉框最多 25 项。
-        view = ResourceSelectView(
-            resources,
-            resource_list_embed=embed,
-        )
+        if panel_mode is DownloadPanelMode.PUBLIC_GATEWAY:
+            view = PublicResourceSelectView(
+                resources,
+                resource_list_embed=embed,
+            )
+        else:
+            view = ResourceSelectView(
+                resources,
+                resource_list_embed=embed,
+            )
         return {"embed": embed, "view": view}
 
     async def create_download_view(

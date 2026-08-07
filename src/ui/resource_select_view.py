@@ -8,6 +8,7 @@ import discord
 
 from src.database.database import AsyncSessionLocal
 from src.database.models import Resource
+from src.ui.password_input_modal import DownloadResponseMode
 from src.ui.resource_select import ResourceSelect
 from src.ui.wishlist_ui import (
     WishlistConsentView,
@@ -71,6 +72,34 @@ class ResourceSelectView(discord.ui.View):
             )
         self.selected_resource_id = resource_id
         self.set_wishlist_state(is_wishlisted)
+
+    async def on_timeout(self):
+        self.stop()
+
+
+class PublicResourceSelectView(discord.ui.View):
+    """公开的限时防呆入口，只用于选择版本并创建私密下载面板。"""
+
+    def __init__(
+        self,
+        resources: Sequence[Resource],
+        *,
+        resource_list_embed: discord.Embed,
+        timeout: float = 60.0,
+    ):
+        super().__init__(timeout=timeout)
+        resource_snapshot = tuple(resources)
+        self.add_item(
+            ResourceSelect(
+                resource_snapshot,
+                resource_list_embed=resource_list_embed,
+                response_mode=DownloadResponseMode.CREATE_PRIVATE_PANEL,
+                private_view_factory=lambda: ResourceSelectView(
+                    resource_snapshot,
+                    resource_list_embed=resource_list_embed,
+                ),
+            )
+        )
 
     async def on_timeout(self):
         self.stop()

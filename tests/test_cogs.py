@@ -1,8 +1,79 @@
 import pytest
 import discord
-from unittest.mock import AsyncMock, MagicMock, call
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
+from src.cogs.antispam_cog import AntiSpamCog
 from src.cogs.upload_cog import UploadCog
+from src.services.download_service import DownloadPanelMode
+
+
+def make_session_context() -> MagicMock:
+    context = MagicMock()
+    context.__aenter__ = AsyncMock(return_value=MagicMock())
+    context.__aexit__ = AsyncMock(return_value=None)
+    return context
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("keyword", ["下载", "/下载", "／下载"])
+async def test_antispam_keywords_send_short_lived_public_gateway(keyword: str):
+    bot = MagicMock()
+    response_data = {
+        "embed": discord.Embed(title="📄 版本选择"),
+        "view": discord.ui.View(),
+    }
+    bot.download_service.handle_download_request = AsyncMock(
+        return_value=response_data
+    )
+    cog = AntiSpamCog(bot)
+    channel = MagicMock(spec=discord.Thread)
+    channel.send = AsyncMock()
+    message = MagicMock(spec=discord.Message)
+    message.channel = channel
+    message.author.bot = False
+    message.content = keyword
+
+    with patch(
+        "src.cogs.antispam_cog.AsyncSessionLocal",
+        return_value=make_session_context(),
+    ):
+        await cog.on_message(message)
+
+    bot.download_service.handle_download_request.assert_awaited_once()
+    request_kwargs = bot.download_service.handle_download_request.await_args.kwargs
+    assert request_kwargs["source"] is message
+    assert request_kwargs["panel_mode"] is DownloadPanelMode.PUBLIC_GATEWAY
+    channel.send.assert_awaited_once_with(**response_data, delete_after=60)
+
+
+@pytest.mark.asyncio
+async def test_antispam_ignores_non_exact_keyword_and_empty_resource_result():
+    bot = MagicMock()
+    bot.download_service.handle_download_request = AsyncMock()
+    cog = AntiSpamCog(bot)
+    channel = MagicMock(spec=discord.Thread)
+    channel.send = AsyncMock()
+    message = MagicMock(spec=discord.Message)
+    message.channel = channel
+    message.author.bot = False
+    message.content = "请帮我下载"
+
+    await cog.on_message(message)
+
+    bot.download_service.handle_download_request.assert_not_awaited()
+    channel.send.assert_not_awaited()
+
+    message.content = "下载"
+    bot.download_service.handle_download_request.return_value = {
+        "embed": discord.Embed(title="📂 暂无资源")
+    }
+    with patch(
+        "src.cogs.antispam_cog.AsyncSessionLocal",
+        return_value=make_session_context(),
+    ):
+        await cog.on_message(message)
+
+    channel.send.assert_not_awaited()
 
 
 @pytest.mark.asyncio

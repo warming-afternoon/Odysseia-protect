@@ -5,13 +5,14 @@ from unittest.mock import AsyncMock, MagicMock
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.services.upload_service import UploadService
-from src.services.download_service import DownloadService
+from src.services.download_service import DownloadPanelMode, DownloadService
 from src.services.management_service import ManagementService
 from src.database.repositories.resource import ResourceRepository
 from src.database.repositories.thread import ThreadRepository
 from src.database.repositories.user import UserRepository
 from src.database.schemas import ResourceCreate, ThreadCreate, UserCreate
 from src.database.models import UploadMode
+from src.ui.resource_select_view import PublicResourceSelectView, ResourceSelectView
 
 
 @pytest.mark.asyncio
@@ -184,6 +185,15 @@ class TestDownloadService:
         assert "embed" in result
         assert "view" in result
         assert result["embed"].title == "📄 版本选择"
+        assert isinstance(result["view"], ResourceSelectView)
+
+        public_result = await service.handle_download_request(
+            session=db_session,
+            source=mock_interaction,
+            panel_mode=DownloadPanelMode.PUBLIC_GATEWAY,
+        )
+
+        assert isinstance(public_result["view"], PublicResourceSelectView)
 
 
 @pytest.mark.asyncio

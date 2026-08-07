@@ -1,10 +1,19 @@
 import logging
+from enum import Enum
 
 import discord
 
 from src.dto.resource_dto import ResourceDTO
 
 logger = logging.getLogger(__name__)
+
+
+class DownloadResponseMode(Enum):
+    """下载选择后的响应目标。"""
+
+    EDIT_PRIVATE_PANEL = "edit_private_panel"
+    CREATE_PRIVATE_PANEL = "create_private_panel"
+
 
 class PasswordModal(discord.ui.Modal, title="请输入下载密码"):
     """一个用于在下载前验证密码的弹出式模态框。"""
@@ -15,11 +24,13 @@ class PasswordModal(discord.ui.Modal, title="请输入下载密码"):
         *,
         resource_list_embed: discord.Embed,
         panel_view: discord.ui.View,
+        response_mode: DownloadResponseMode = DownloadResponseMode.EDIT_PRIVATE_PANEL,
     ):
         super().__init__(timeout=300)  # 5分钟超时
         self.resource = resource
         self.resource_list_embed = resource_list_embed
         self.panel_view = panel_view
+        self.response_mode = response_mode
 
         self.password_input = discord.ui.TextInput(
             label="密码",
@@ -41,8 +52,11 @@ class PasswordModal(discord.ui.Modal, title="请输入下载密码"):
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
 
-        # 密码正确，立即延迟响应
-        await interaction.response.defer()
+        # 公开防呆面板不能被原地更新；密码通过后创建新的私密响应。
+        if self.response_mode is DownloadResponseMode.CREATE_PRIVATE_PANEL:
+            await interaction.response.defer(ephemeral=True, thinking=True)
+        else:
+            await interaction.response.defer()
 
         try:
             download_service = getattr(interaction.client, "download_service", None)
@@ -70,4 +84,11 @@ class PasswordModal(discord.ui.Modal, title="请输入下载密码"):
                 "❌ 抱歉，获取下载链接时发生错误。"
                 "源文件可能已被删除或Bot无法访问。"
             )
-            await interaction.followup.send(error_message, ephemeral=True)
+            if self.response_mode is DownloadResponseMode.CREATE_PRIVATE_PANEL:
+                await interaction.edit_original_response(
+                    content=error_message,
+                    embeds=[],
+                    view=None,
+                )
+            else:
+                await interaction.followup.send(error_message, ephemeral=True)

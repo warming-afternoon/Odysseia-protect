@@ -5,6 +5,7 @@ from discord.ext import commands
 
 from src.config import ANTISPAM_KEYWORDS
 from src.database.database import AsyncSessionLocal
+from src.services.download_service import DownloadPanelMode
 
 if TYPE_CHECKING:
     from main import OdysseiaProtect
@@ -36,7 +37,9 @@ class AntiSpamCog(commands.Cog):
         # 调用通用的 download_service 来处理请求
         async with AsyncSessionLocal() as session:
             response_data = await self.bot.download_service.handle_download_request(
-                session, source=message
+                session,
+                source=message,
+                panel_mode=DownloadPanelMode.PUBLIC_GATEWAY,
             )
 
         # 如果服务确定帖子无效或没有资源，则不响应

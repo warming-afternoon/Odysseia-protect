@@ -4,6 +4,7 @@
 """
 
 import logging
+from collections.abc import Callable
 from typing import Sequence
 
 import discord
@@ -11,7 +12,7 @@ import discord
 from src.database.database import AsyncSessionLocal
 from src.database.models import Resource, UploadMode
 from src.database.repositories.resource import ResourceRepository
-from src.ui.password_input_modal import PasswordModal
+from src.ui.password_input_modal import DownloadResponseMode, PasswordModal
 from src.dto.resource_dto import ResourceDTO
 
 logger = logging.getLogger(__name__)
@@ -26,8 +27,12 @@ class ResourceSelect(discord.ui.Select):
         resources: Sequence[Resource],
         *,
         resource_list_embed: discord.Embed | None = None,
+        response_mode: DownloadResponseMode = DownloadResponseMode.EDIT_PRIVATE_PANEL,
+        private_view_factory: Callable[[], discord.ui.View] | None = None,
     ):
         self.resource_list_embed = resource_list_embed
+        self.response_mode = response_mode
+        self.private_view_factory = private_view_factory
         options = []
         # Discord 的下拉菜单最多只能有 25 个选项
         for resource in resources[:25]:
@@ -123,15 +128,29 @@ class ResourceSelect(discord.ui.Select):
             )
             return
 
+        panel_view = self.view
+        if self.response_mode is DownloadResponseMode.CREATE_PRIVATE_PANEL:
+            if self.private_view_factory is None:
+                await interaction.response.send_message(
+                    "❌ 下载面板状态已失效，请重新发送“下载”。",
+                    ephemeral=True,
+                )
+                return
+            panel_view = self.private_view_factory()
+
         # 如果资源有密码，立即弹出模态框
         if resource_dto.password:
             modal = PasswordModal(
                 resource=resource_dto,
                 resource_list_embed=resource_list_embed,
-                panel_view=self.view,
+                panel_view=panel_view,
+                response_mode=self.response_mode,
             )
             await interaction.response.send_modal(modal)
-            if interaction.message:
+            if (
+                self.response_mode is DownloadResponseMode.EDIT_PRIVATE_PANEL
+                and interaction.message
+            ):
                 try:
                     await interaction.message.edit(view=self.view)
                 except discord.HTTPException:
@@ -139,7 +158,10 @@ class ResourceSelect(discord.ui.Select):
             return
 
         # 对于没有密码的资源
-        await interaction.response.defer()
+        if self.response_mode is DownloadResponseMode.CREATE_PRIVATE_PANEL:
+            await interaction.response.defer(ephemeral=True, thinking=True)
+        else:
+            await interaction.response.defer()
 
         try:
             download_service = getattr(interaction.client, "download_service", None)
@@ -153,14 +175,14 @@ class ResourceSelect(discord.ui.Select):
             response_embed = download_service.build_download_embed(
                 resource_dto, fresh_url
             )
-            if hasattr(self.view, "authorize_selection"):
-                await self.view.authorize_selection(
+            if hasattr(panel_view, "authorize_selection"):
+                await panel_view.authorize_selection(
                     interaction,
                     resource_id=selected_resource_id,
                 )
             await interaction.edit_original_response(
                 embeds=[response_embed, resource_list_embed],
-                view=self.view,
+                view=panel_view,
             )
 
         except Exception as e:
@@ -171,4 +193,11 @@ class ResourceSelect(discord.ui.Select):
                 "❌ 抱歉，获取下载链接时发生错误。"
                 "源文件可能已被删除或Bot无法访问。"
             )
-            await interaction.followup.send(error_message, ephemeral=True)
+            if self.response_mode is DownloadResponseMode.CREATE_PRIVATE_PANEL:
+                await interaction.edit_original_response(
+                    content=error_message,
+                    embeds=[],
+                    view=None,
+                )
+            else:
+                await interaction.followup.send(error_message, ephemeral=True)
