@@ -295,6 +295,37 @@ async def test_public_password_selection_creates_private_complete_panel():
 
 
 @pytest.mark.asyncio
+async def test_private_password_selection_only_opens_modal_without_editing_panel():
+    resource = make_resource(1, version="v1", password="secret")
+    view = ResourceSelectView(
+        [resource],
+        resource_list_embed=discord.Embed(title="📄 版本选择"),
+    )
+    select = view.children[0]
+    select._values = ["1"]
+    interaction = make_interaction(MagicMock())
+    private_message = SimpleNamespace(edit=AsyncMock())
+    interaction.message = private_message
+    repository = MagicMock()
+    repository.get_with_thread = AsyncMock(return_value=resource)
+
+    with (
+        patch(
+            "src.ui.resource_select.AsyncSessionLocal",
+            return_value=make_session_context(),
+        ),
+        patch(
+            "src.ui.resource_select.ResourceRepository",
+            return_value=repository,
+        ),
+    ):
+        await select.callback(interaction)
+
+    interaction.response.send_modal.assert_awaited_once()
+    private_message.edit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_public_download_gateway_reports_link_failure_privately():
     resource = make_resource(1, version="v1")
     public_view = PublicResourceSelectView(

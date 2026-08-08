@@ -147,14 +147,6 @@ class ResourceSelect(discord.ui.Select):
                 response_mode=self.response_mode,
             )
             await interaction.response.send_modal(modal)
-            if (
-                self.response_mode is DownloadResponseMode.EDIT_PRIVATE_PANEL
-                and interaction.message
-            ):
-                try:
-                    await interaction.message.edit(view=self.view)
-                except discord.HTTPException:
-                    logger.warning("无法在密码验证前刷新心愿单按钮状态")
             return
 
         # 对于没有密码的资源
