@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.database.models import UploadMode
 from src.dto.resource_dto import ResourceDTO
 from src.services.base import BaseService
+from src.services.delivery_service import DeliveryResult
 from src.ui.resource_select_view import PublicResourceSelectView, ResourceSelectView
 from src.utils.formatting import format_resource_list_chunks
 
@@ -168,6 +169,40 @@ class DownloadService(BaseService):
             raise ValueError("源消息中没有附件。")
         return source_message.attachments[0].url
 
+    async def fetch_source_bytes(self, resource: ResourceDTO) -> bytes:
+        """读取仓库中的源附件，仅供动态溯源缓存未命中时使用。"""
+        channel_id = resource.warehouse_thread_id or resource.public_thread_id
+        if not channel_id:
+            raise ValueError("数据库中未找到该资源关联的频道ID。")
+        source_channel = await self.bot.fetch_channel(channel_id)
+        if not isinstance(source_channel, (discord.TextChannel, discord.Thread)):
+            raise ValueError("资源源频道类型无效。")
+        source_message = await source_channel.fetch_message(resource.source_message_id)
+        if not source_message.attachments:
+            raise ValueError("源消息中没有附件。")
+        return await source_message.attachments[0].read()
+
+    async def fetch_delivery(
+        self,
+        resource: ResourceDTO,
+        *,
+        user_id: int,
+    ) -> DeliveryResult:
+        """返回普通附件 URL，或生成/复用动态溯源交付。"""
+        if not resource.trace_enabled:
+            return DeliveryResult(
+                filename=resource.filename or "resource",
+                url=await self.fetch_fresh_url(resource),
+            )
+        delivery_service = getattr(self.bot, "delivery_service", None)
+        if delivery_service is None:
+            raise RuntimeError("Bot 未配置动态交付服务。")
+        return await delivery_service.deliver(
+            resource,
+            user_id=user_id,
+            source_loader=lambda: self.fetch_source_bytes(resource),
+        )
+
     @staticmethod
     def build_download_embed(resource: ResourceDTO, fresh_url: str) -> discord.Embed:
         """构建同时适合直接下载和复制到 SillyTavern 的结果页。"""
@@ -187,3 +222,20 @@ class DownloadService(BaseService):
         if filename.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
             embed.set_image(url=fresh_url)
         return embed
+
+    @staticmethod
+    def build_delivery_embed(
+        resource: ResourceDTO, delivery: DeliveryResult
+    ) -> discord.Embed:
+        if delivery.url:
+            return DownloadService.build_download_embed(resource, delivery.url)
+        return discord.Embed(
+            title="📥 个性化角色卡下载",
+            description=(
+                f"**版本：** {resource.version_info}\n"
+                f"**文件：** `{delivery.filename}`\n\n"
+                "R2 当前不可用，已改用本条私密消息的附件交付。\n"
+                "该附件仅包含为当前用户生成的溯源凭证。"
+            ),
+            color=discord.Color.orange(),
+        )

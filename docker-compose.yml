@@ -10,8 +10,14 @@ services:
     command: ["python", "main.py"]
     volumes:
       - ./data:/app/data
+    environment:
+      REDIS_URL: ${REDIS_URL:-redis://odysseia-protect-redis:6379/0}
+    depends_on:
+      odysseia-protect-redis:
+        condition: service_healthy
     networks:
       - bot-bridge
+      - trace-cache
 
   odysseia-protect-migrate:
     build:
@@ -26,7 +32,27 @@ services:
     volumes:
       - ./data:/app/data
 
+  odysseia-protect-redis:
+    image: redis:7.4-alpine
+    container_name: odysseia-protect-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - trace-cache
+
 networks:
   bot-bridge:
     external: true
     name: ${BOT_BRIDGE_NETWORK:-Odysseia-BOT}
+  trace-cache:
+    driver: bridge
+
+volumes:
+  redis-data:

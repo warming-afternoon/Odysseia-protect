@@ -1,0 +1,45 @@
+method,attack,recovered,structure_recovered,sequential_lsb_recovered,repeated_lsb_recovered,logical_bit_error_rate,output_size
+Structure JSON+trAc,Untouched,True,True,False,False,,602158
+Structure JSON+trAc,Strip metadata,False,False,False,False,,581719
+Structure JSON+trAc,PNG resave,False,False,False,False,,487671
+Structure JSON+trAc,WebP lossless,False,False,False,False,,496679
+Structure JSON+trAc,0.1% LSB noise,True,True,False,False,,517153
+Structure JSON+trAc,Clear all LSB,True,True,False,False,,421826
+Structure JSON+trAc,JPEG q95,False,False,False,False,,506149
+Structure JSON+trAc,WebP q90,False,False,False,False,,463442
+Structure JSON+trAc,Resize 90%,False,False,False,False,,497433
+Structure JSON+trAc,Crop 5px,False,False,False,False,,486854
+Structure JSON+trAc,Strip+clear,False,False,False,False,,401387
+Sequential LSB,Untouched,True,False,True,False,0.0,515925
+Sequential LSB,Strip metadata,True,False,True,False,0.0,496754
+Sequential LSB,PNG resave,True,False,True,False,0.0,487713
+Sequential LSB,WebP lossless,True,False,True,False,0.0,496754
+Sequential LSB,0.1% LSB noise,False,False,False,False,0.0007331378299120235,515958
+Sequential LSB,Clear all LSB,False,False,False,False,0.4626099706744868,420558
+Sequential LSB,JPEG q95,False,False,False,False,0.5025659824046921,506170
+Sequential LSB,WebP q90,False,False,False,False,0.4897360703812317,462966
+Sequential LSB,Resize 90%,False,False,False,False,0.4637096774193548,497424
+Sequential LSB,Crop 5px,False,False,False,False,0.48607038123167157,486854
+Sequential LSB,Strip+clear,False,False,False,False,0.4626099706744868,401387
+Scattered LSB x3,Untouched,True,False,False,True,0.0,516562
+Scattered LSB x3,Strip metadata,True,False,False,True,0.0,497391
+Scattered LSB x3,PNG resave,True,False,False,True,0.0,488454
+Scattered LSB x3,WebP lossless,True,False,False,True,0.0,497391
+Scattered LSB x3,0.1% LSB noise,True,False,False,True,0.0,516638
+Scattered LSB x3,Clear all LSB,False,False,False,False,0.4626099706744868,420558
+Scattered LSB x3,JPEG q95,False,False,False,False,0.5043988269794721,506467
+Scattered LSB x3,WebP q90,False,False,False,False,0.5142961876832844,463199
+Scattered LSB x3,Resize 90%,False,False,False,False,0.4153225806451613,497645
+Scattered LSB x3,Crop 5px,False,False,False,False,0.4937683284457478,487589
+Scattered LSB x3,Strip+clear,False,False,False,False,0.4626099706744868,401387
+Composite,Untouched,True,True,False,True,0.0,517830
+Composite,Strip metadata,True,False,False,True,0.0,497391
+Composite,PNG resave,True,False,False,True,0.0,488454
+Composite,WebP lossless,True,False,False,True,0.0,497391
+Composite,0.1% LSB noise,True,True,False,True,0.0,517906
+Composite,Clear all LSB,True,True,False,False,0.4626099706744868,421826
+Composite,JPEG q95,False,False,False,False,0.5043988269794721,506467
+Composite,WebP q90,False,False,False,False,0.5142961876832844,463199
+Composite,Resize 90%,False,False,False,False,0.4153225806451613,497645
+Composite,Crop 5px,False,False,False,False,0.4937683284457478,487589
+Composite,Strip+clear,False,False,False,False,0.4626099706744868,401387

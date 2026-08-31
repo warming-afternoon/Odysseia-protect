@@ -23,6 +23,10 @@ from src.services.upload_service import UploadService
 from src.services.download_service import DownloadService
 from src.services.management_service import ManagementService
 from src.services.wishlist_service import WishlistService
+from src.services.delivery_service import DeliveryService
+from src.services.object_store import R2ObjectStore
+from src.services.traceability_service import TraceabilityService
+from src.services.verification_service import VerificationService
 # from src.services.reaction_wall_service import ReactionWallService
 
 
@@ -74,6 +78,16 @@ class OdysseiaProtect(commands.Bot):
         resource_repo = ResourceRepository()
         user_repo = UserRepository()
         wishlist_repo = WishlistRepository()
+        self.traceability_service = TraceabilityService.from_environment()
+        self.object_store = R2ObjectStore()
+        self.delivery_service = DeliveryService(
+            self.traceability_service,
+            self.object_store,
+        )
+        self.verification_service = VerificationService(
+            self.traceability_service,
+            self.object_store,
+        )
         self.upload_service = UploadService(self, resource_repo, thread_repo, user_repo)
         self.download_service = DownloadService(
             self, resource_repo, thread_repo, user_repo
@@ -102,6 +116,9 @@ class OdysseiaProtect(commands.Bot):
         logger.info("正在初始化数据库...")
         await init_db()
         logger.info("数据库初始化完成。")
+
+        await self.delivery_service.start()
+        await self.verification_service.start()
 
         # 动态加载 Cogs
         logger.info("开始加载 Cogs...")
@@ -141,6 +158,11 @@ class OdysseiaProtect(commands.Bot):
     async def on_ready(self):
         """当 Bot 完全准备就绪时调用。"""
         logger.info("Bot 已完全准备就绪。")
+
+    async def close(self):
+        await self.verification_service.close()
+        await self.delivery_service.close()
+        await super().close()
 
 
 # --- 应用程序主入口 ---

@@ -14,6 +14,7 @@ from src.database.models import Resource, UploadMode
 from src.database.repositories.resource import ResourceRepository
 from src.ui.password_input_modal import DownloadResponseMode, PasswordModal
 from src.dto.resource_dto import ResourceDTO
+from src.ui.trace_consent_ui import send_trace_consent
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,10 @@ class ResourceSelect(discord.ui.Select):
         options = []
         # Discord 的下拉菜单最多只能有 25 个选项
         for resource in resources[:25]:
-            mode_icon = "🔒" if resource.upload_mode == UploadMode.SECURE else "📄"
+            if getattr(resource, "trace_enabled", False):
+                mode_icon = "🔎"
+            else:
+                mode_icon = "🔒" if resource.upload_mode == UploadMode.SECURE else "📄"
             
             # 构建 label 和 description，确保不超过 Discord 的 100 字符限制
             label_text = f"{mode_icon} 版本: {resource.version_info or '未命名'}"
@@ -111,6 +115,7 @@ class ResourceSelect(discord.ui.Select):
             public_thread_name=selected_resource.thread.public_thread_name,
             source_status=selected_resource.thread.source_status,
             upload_mode=selected_resource.upload_mode,
+            trace_enabled=getattr(selected_resource, "trace_enabled", False),
         )
 
         resource_list_embed = self.resource_list_embed
@@ -147,6 +152,15 @@ class ResourceSelect(discord.ui.Select):
                 response_mode=self.response_mode,
             )
             await interaction.response.send_modal(modal)
+            return
+
+        if resource_dto.trace_enabled:
+            await send_trace_consent(
+                interaction,
+                resource=resource_dto,
+                resource_list_embed=resource_list_embed,
+                panel_view=panel_view,
+            )
             return
 
         # 对于没有密码的资源

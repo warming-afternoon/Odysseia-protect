@@ -1,0 +1,552 @@
+{
+  "sample": {
+    "path": "/Users/macbookair/Odysseia-protect/Watermark/default_Seraphina.png",
+    "size": 600890,
+    "width": 400,
+    "height": 600,
+    "envelope_bytes": 328
+  },
+  "quality": {
+    "Structure JSON+trAc": {
+      "mse": 0.0,
+      "mae": 0.0,
+      "psnr_db": null,
+      "changed_channels": 0,
+      "changed_pixels": 0
+    },
+    "Sequential LSB": {
+      "mse": 0.0019069444444444444,
+      "mae": 0.0019069444444444444,
+      "psnr_db": 75.32742320062424,
+      "changed_channels": 1373,
+      "changed_pixels": 789
+    },
+    "Scattered LSB x3": {
+      "mse": 0.005743055555555556,
+      "mae": 0.005743055555555556,
+      "psnr_db": 70.53937343410612,
+      "changed_channels": 4135,
+      "changed_pixels": 4115
+    },
+    "Composite": {
+      "mse": 0.005743055555555556,
+      "mae": 0.005743055555555556,
+      "psnr_db": 70.53937343410612,
+      "changed_channels": 4135,
+      "changed_pixels": 4115
+    }
+  },
+  "performance": {
+    "Structure JSON+trAc": {
+      "inject": {
+        "mean_ms": 0.6385922941262834,
+        "p50_ms": 0.6056670099496841,
+        "p95_ms": 0.8528330363333225,
+        "max_ms": 1.1753339786082506
+      },
+      "extract": {
+        "mean_ms": 0.20092961203772575,
+        "p50_ms": 0.19466690719127655,
+        "p95_ms": 0.271082972176373,
+        "max_ms": 0.4024159861728549
+      }
+    },
+    "Sequential LSB": {
+      "inject": {
+        "mean_ms": 28.925568757404108,
+        "p50_ms": 28.516499907709658,
+        "p95_ms": 31.57087496947497,
+        "max_ms": 36.05283400975168
+      },
+      "extract": {
+        "mean_ms": 6.875604165543336,
+        "p50_ms": 6.323624984361231,
+        "p95_ms": 9.50220797676593,
+        "max_ms": 19.32883297558874
+      }
+    },
+    "Scattered LSB x3": {
+      "inject": {
+        "mean_ms": 32.605258854164276,
+        "p50_ms": 32.08237502258271,
+        "p95_ms": 35.80579091794789,
+        "max_ms": 37.809915957041085
+      },
+      "extract": {
+        "mean_ms": 9.673289045167621,
+        "p50_ms": 9.619541000574827,
+        "p95_ms": 10.245125042274594,
+        "max_ms": 10.62204095069319
+      }
+    },
+    "Composite": {
+      "inject": {
+        "mean_ms": 32.96241043281043,
+        "p50_ms": 32.53658302128315,
+        "p95_ms": 35.28054209891707,
+        "max_ms": 43.15574991051108
+      },
+      "extract": {
+        "mean_ms": 10.683920321753249,
+        "p50_ms": 9.965249919332564,
+        "p95_ms": 14.570915955118835,
+        "max_ms": 19.11420898977667
+      }
+    }
+  },
+  "survival": [
+    {
+      "method": "Structure JSON+trAc",
+      "attack": "Untouched",
+      "recovered": true,
+      "structure_recovered": true,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": null,
+      "output_size": 602158
+    },
+    {
+      "method": "Structure JSON+trAc",
+      "attack": "Strip metadata",
+      "recovered": false,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": null,
+      "output_size": 581719
+    },
+    {
+      "method": "Structure JSON+trAc",
+      "attack": "PNG resave",
+      "recovered": false,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": null,
+      "output_size": 487671
+    },
+    {
+      "method": "Structure JSON+trAc",
+      "attack": "WebP lossless",
+      "recovered": false,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": null,
+      "output_size": 496679
+    },
+    {
+      "method": "Structure JSON+trAc",
+      "attack": "0.1% LSB noise",
+      "recovered": true,
+      "structure_recovered": true,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": null,
+      "output_size": 517153
+    },
+    {
+      "method": "Structure JSON+trAc",
+      "attack": "Clear all LSB",
+      "recovered": true,
+      "structure_recovered": true,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": null,
+      "output_size": 421826
+    },
+    {
+      "method": "Structure JSON+trAc",
+      "attack": "JPEG q95",
+      "recovered": false,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": null,
+      "output_size": 506149
+    },
+    {
+      "method": "Structure JSON+trAc",
+      "attack": "WebP q90",
+      "recovered": false,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": null,
+      "output_size": 463442
+    },
+    {
+      "method": "Structure JSON+trAc",
+      "attack": "Resize 90%",
+      "recovered": false,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": null,
+      "output_size": 497433
+    },
+    {
+      "method": "Structure JSON+trAc",
+      "attack": "Crop 5px",
+      "recovered": false,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": null,
+      "output_size": 486854
+    },
+    {
+      "method": "Structure JSON+trAc",
+      "attack": "Strip+clear",
+      "recovered": false,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": null,
+      "output_size": 401387
+    },
+    {
+      "method": "Sequential LSB",
+      "attack": "Untouched",
+      "recovered": true,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": true,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": 0.0,
+      "output_size": 515925
+    },
+    {
+      "method": "Sequential LSB",
+      "attack": "Strip metadata",
+      "recovered": true,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": true,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": 0.0,
+      "output_size": 496754
+    },
+    {
+      "method": "Sequential LSB",
+      "attack": "PNG resave",
+      "recovered": true,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": true,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": 0.0,
+      "output_size": 487713
+    },
+    {
+      "method": "Sequential LSB",
+      "attack": "WebP lossless",
+      "recovered": true,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": true,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": 0.0,
+      "output_size": 496754
+    },
+    {
+      "method": "Sequential LSB",
+      "attack": "0.1% LSB noise",
+      "recovered": false,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": 0.0007331378299120235,
+      "output_size": 515958
+    },
+    {
+      "method": "Sequential LSB",
+      "attack": "Clear all LSB",
+      "recovered": false,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": 0.4626099706744868,
+      "output_size": 420558
+    },
+    {
+      "method": "Sequential LSB",
+      "attack": "JPEG q95",
+      "recovered": false,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": 0.5025659824046921,
+      "output_size": 506170
+    },
+    {
+      "method": "Sequential LSB",
+      "attack": "WebP q90",
+      "recovered": false,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": 0.4897360703812317,
+      "output_size": 462966
+    },
+    {
+      "method": "Sequential LSB",
+      "attack": "Resize 90%",
+      "recovered": false,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": 0.4637096774193548,
+      "output_size": 497424
+    },
+    {
+      "method": "Sequential LSB",
+      "attack": "Crop 5px",
+      "recovered": false,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": 0.48607038123167157,
+      "output_size": 486854
+    },
+    {
+      "method": "Sequential LSB",
+      "attack": "Strip+clear",
+      "recovered": false,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": 0.4626099706744868,
+      "output_size": 401387
+    },
+    {
+      "method": "Scattered LSB x3",
+      "attack": "Untouched",
+      "recovered": true,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": true,
+      "logical_bit_error_rate": 0.0,
+      "output_size": 516562
+    },
+    {
+      "method": "Scattered LSB x3",
+      "attack": "Strip metadata",
+      "recovered": true,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": true,
+      "logical_bit_error_rate": 0.0,
+      "output_size": 497391
+    },
+    {
+      "method": "Scattered LSB x3",
+      "attack": "PNG resave",
+      "recovered": true,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": true,
+      "logical_bit_error_rate": 0.0,
+      "output_size": 488454
+    },
+    {
+      "method": "Scattered LSB x3",
+      "attack": "WebP lossless",
+      "recovered": true,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": true,
+      "logical_bit_error_rate": 0.0,
+      "output_size": 497391
+    },
+    {
+      "method": "Scattered LSB x3",
+      "attack": "0.1% LSB noise",
+      "recovered": true,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": true,
+      "logical_bit_error_rate": 0.0,
+      "output_size": 516638
+    },
+    {
+      "method": "Scattered LSB x3",
+      "attack": "Clear all LSB",
+      "recovered": false,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": 0.4626099706744868,
+      "output_size": 420558
+    },
+    {
+      "method": "Scattered LSB x3",
+      "attack": "JPEG q95",
+      "recovered": false,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": 0.5043988269794721,
+      "output_size": 506467
+    },
+    {
+      "method": "Scattered LSB x3",
+      "attack": "WebP q90",
+      "recovered": false,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": 0.5142961876832844,
+      "output_size": 463199
+    },
+    {
+      "method": "Scattered LSB x3",
+      "attack": "Resize 90%",
+      "recovered": false,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": 0.4153225806451613,
+      "output_size": 497645
+    },
+    {
+      "method": "Scattered LSB x3",
+      "attack": "Crop 5px",
+      "recovered": false,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": 0.4937683284457478,
+      "output_size": 487589
+    },
+    {
+      "method": "Scattered LSB x3",
+      "attack": "Strip+clear",
+      "recovered": false,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": 0.4626099706744868,
+      "output_size": 401387
+    },
+    {
+      "method": "Composite",
+      "attack": "Untouched",
+      "recovered": true,
+      "structure_recovered": true,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": true,
+      "logical_bit_error_rate": 0.0,
+      "output_size": 517830
+    },
+    {
+      "method": "Composite",
+      "attack": "Strip metadata",
+      "recovered": true,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": true,
+      "logical_bit_error_rate": 0.0,
+      "output_size": 497391
+    },
+    {
+      "method": "Composite",
+      "attack": "PNG resave",
+      "recovered": true,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": true,
+      "logical_bit_error_rate": 0.0,
+      "output_size": 488454
+    },
+    {
+      "method": "Composite",
+      "attack": "WebP lossless",
+      "recovered": true,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": true,
+      "logical_bit_error_rate": 0.0,
+      "output_size": 497391
+    },
+    {
+      "method": "Composite",
+      "attack": "0.1% LSB noise",
+      "recovered": true,
+      "structure_recovered": true,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": true,
+      "logical_bit_error_rate": 0.0,
+      "output_size": 517906
+    },
+    {
+      "method": "Composite",
+      "attack": "Clear all LSB",
+      "recovered": true,
+      "structure_recovered": true,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": 0.4626099706744868,
+      "output_size": 421826
+    },
+    {
+      "method": "Composite",
+      "attack": "JPEG q95",
+      "recovered": false,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": 0.5043988269794721,
+      "output_size": 506467
+    },
+    {
+      "method": "Composite",
+      "attack": "WebP q90",
+      "recovered": false,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": 0.5142961876832844,
+      "output_size": 463199
+    },
+    {
+      "method": "Composite",
+      "attack": "Resize 90%",
+      "recovered": false,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": 0.4153225806451613,
+      "output_size": 497645
+    },
+    {
+      "method": "Composite",
+      "attack": "Crop 5px",
+      "recovered": false,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": 0.4937683284457478,
+      "output_size": 487589
+    },
+    {
+      "method": "Composite",
+      "attack": "Strip+clear",
+      "recovered": false,
+      "structure_recovered": false,
+      "sequential_lsb_recovered": false,
+      "repeated_lsb_recovered": false,
+      "logical_bit_error_rate": 0.4626099706744868,
+      "output_size": 401387
+    }
+  ],
+  "traffic": {
+    "downloads_per_day": 30000,
+    "peak_window": "20:00-00:00",
+    "peak_hours": 4,
+    "average_requests_per_second_in_window": 2.0833333333333335,
+    "initial_bandwidth_mbps": 250,
+    "initial_safe_budget_mbps": 200,
+    "maximum_bandwidth_mbps": 1000,
+    "max_average_file_mb_at_250_mbps": 14.999999999999998,
+    "safe_average_file_mb_at_200_mbps": 12.0,
+    "max_average_file_mb_at_1_gbps": 59.99999999999999,
+    "sample_required_mbps": 10.014833333333335
+  }
+}

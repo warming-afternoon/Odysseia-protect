@@ -2,6 +2,7 @@ import datetime
 import enum
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     DateTime,
     Enum,
     ForeignKey,
@@ -91,6 +92,9 @@ class Resource(Base):
     filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=func.now())
     download_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    trace_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0", nullable=False
+    )
 
     # --- 关系 ---
     # 多个 Resource 属于一个 Thread
@@ -162,3 +166,32 @@ class WishlistItem(Base):
             f"<WishlistItem(id={self.id}, user_id={self.user_id}, "
             f"resource_id={self.resource_id})>"
         )
+
+
+class TraceVerificationJob(Base):
+    """管理员提交的单个溯源核验附件任务。"""
+
+    __tablename__ = "trace_verification_jobs"
+    __table_args__ = (
+        Index("ix_trace_jobs_requester_created", "requester_id", "created_at"),
+        Index("ix_trace_jobs_expires", "expires_at"),
+    )
+
+    report_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    requester_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    guild_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    channel_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    input_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), default="queued", server_default="queued", nullable=False
+    )
+    summary_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    report_object_key: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime, default=func.now(), onupdate=func.now(), nullable=False
+    )
+    expires_at: Mapped[datetime.datetime] = mapped_column(DateTime, nullable=False)

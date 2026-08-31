@@ -22,6 +22,10 @@
 - **隐私协议**
   - 首次使用 Bot 时需同意隐私协议，确保用户了解数据存储与使用规则。
 
+- **可选动态溯源**
+  - 作者可为 PNG 角色卡开启溯源水印。
+  - 管理员可通过 `/溯源 核验` 批量核验 PNG、ZIP 和 7z。
+
 - **数据一致性**
   - 删除受保护资源时，会同时删除仓库频道中的文件副本，确保数据同步。
 
@@ -82,6 +86,8 @@ src/
    WAREHOUSE_CHANNEL_ID=your_warehouse_forum_channel_id
    TEST_GUILD_ID=your_test_guild_id
    ```
+   动态溯源还需要 Redis、私有 R2、AES 密钥及管理员 ID；完整配置见
+   [`docs/dynamic_traceability.md`](docs/dynamic_traceability.md)
 
 4. **运行 Bot**
 - windows 部署
@@ -146,6 +152,11 @@ CTrl + C
 
 ### `/使用手册`
 显示详细的使用手册（内容来自 `src/config.py`）。
+
+### `/溯源`
+
+- `/溯源 核验`：管理员命令，直接弹出 File Upload Modal，一次上传 1～10 个 PNG、ZIP 或 7z。
+- `/溯源 报告 report_id`：查询排队中、处理中、已完成或失败的核验任务。
 
 ## 数据库设计
 

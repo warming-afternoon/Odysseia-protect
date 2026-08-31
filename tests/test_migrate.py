@@ -216,6 +216,6 @@ def test_upgrade_adds_thread_source_metadata_to_wishlist_head(database_path):
         ).fetchone() == (None, None, "unknown")
         assert conn.execute(
             "SELECT version_num FROM alembic_version"
-        ).fetchone() == ("d2a4f7c9b1e3",)
+        ).fetchone() == ("e4c6b8d0f2a1",)
     finally:
         conn.close()

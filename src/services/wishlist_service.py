@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, Sequence
 
-import discord
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database.models import WishlistItem
@@ -172,6 +171,7 @@ class WishlistService(BaseService):
             public_thread_name=resource.thread.public_thread_name,
             source_status=resource.thread.source_status,
             upload_mode=resource.upload_mode,
+            trace_enabled=resource.trace_enabled,
         )
 
     async def get_page(
@@ -196,11 +196,18 @@ class WishlistService(BaseService):
         if download_service is None:
             raise RuntimeError("Bot 未配置下载服务。")
 
+        async def fetch_url(resource: ResourceDTO) -> str:
+            if not resource.trace_enabled:
+                return await download_service.fetch_fresh_url(resource)
+            delivery = await download_service.fetch_delivery(
+                resource, user_id=user_id
+            )
+            if not delivery.url:
+                raise RuntimeError("R2 暂不可用，请从下载面板获取私密附件")
+            return delivery.url
+
         results = await asyncio.gather(
-            *(
-                download_service.fetch_fresh_url(resource)
-                for resource in resource_dtos
-            ),
+            *(fetch_url(resource) for resource in resource_dtos),
             return_exceptions=True,
         )
 

@@ -18,3 +18,4 @@ class ResourceDTO(BaseModel):
     public_thread_name: Optional[str] = None
     source_status: SourceStatus = SourceStatus.UNKNOWN
     upload_mode: Optional[UploadMode] = None
+    trace_enabled: bool = False

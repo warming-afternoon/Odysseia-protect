@@ -4,6 +4,7 @@ from enum import Enum
 import discord
 
 from src.dto.resource_dto import ResourceDTO
+from src.ui.trace_consent_ui import send_trace_consent
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,16 @@ class PasswordModal(discord.ui.Modal, title="请输入下载密码"):
                 color=discord.Color.red(),
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+
+
+        if self.resource.trace_enabled:
+            await send_trace_consent(
+                interaction,
+                resource=self.resource,
+                resource_list_embed=self.resource_list_embed,
+                panel_view=self.panel_view,
+            )
             return
 
         # 公开防呆面板不能被原地更新；密码通过后创建新的私密响应。
