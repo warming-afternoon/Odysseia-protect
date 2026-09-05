@@ -47,9 +47,13 @@ class ResourceSelect(discord.ui.Select):
             if len(label_text) > 100:
                 label_text = label_text[:90] + "..."
             
-            desc_text = f"文件名: {resource.filename or 'N/A'}"
-            if len(desc_text) > 100:
-                desc_text = desc_text[:90] + "..."
+            upload_date = resource.created_at.strftime("%Y/%m/%d")
+            desc_prefix = f"{upload_date} · 文件名: "
+            filename = resource.filename or "N/A"
+            max_filename_length = 100 - len(desc_prefix)
+            if len(filename) > max_filename_length:
+                filename = filename[: max_filename_length - 3] + "..."
+            desc_text = desc_prefix + filename
             
             # 为每个资源创建一个选项
             option = discord.SelectOption(

@@ -1,7 +1,9 @@
-import pytest
-import discord
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, call, patch
+
+import discord
+import pytest
 
 from src.database.models import UploadMode
 from src.enums import SourceStatus
@@ -55,6 +57,7 @@ def make_resource(
         password=password,
         source_message_id=resource_id + 100,
         upload_mode=UploadMode.SECURE,
+        created_at=datetime(2026, 9, 5, 12, 34, 56),
         thread=SimpleNamespace(
             warehouse_thread_id=200,
             public_thread_id=300,
@@ -67,21 +70,53 @@ def make_resource(
 
 
 @pytest.mark.asyncio
-async def test_download_select_includes_normal_and_secure_resources():
+async def test_download_select_includes_dates_for_all_resource_modes():
     secure = make_resource(1, version="secure")
     normal = make_resource(2, version="normal")
+    trace = make_resource(3, version="trace")
     normal.upload_mode = UploadMode.NORMAL
+    trace.trace_enabled = True
 
-    view = ResourceSelectView([secure, normal])
+    view = ResourceSelectView([secure, normal, trace])
     select = view.children[0]
 
-    assert len(select.options) == 2
+    assert len(select.options) == 3
     assert select.options[0].label.startswith("🔒")
     assert select.options[1].label.startswith("📄")
+    assert select.options[2].label.startswith("🔎")
+    assert [option.description for option in select.options] == [
+        "2026/09/05 · 文件名: card-1.png",
+        "2026/09/05 · 文件名: card-2.png",
+        "2026/09/05 · 文件名: card-3.png",
+    ]
     assert view.children[1].label == "加入心愿单"
     assert view.children[1].disabled is True
     assert view.children[2].label == "从心愿单中移除"
     assert view.children[2].disabled is True
+
+
+def test_download_select_truncates_long_filename_after_date():
+    resource = make_resource(1, version="v1")
+    resource.filename = "a" * 150 + ".png"
+
+    view = ResourceSelectView([resource])
+    description = view.children[0].options[0].description
+
+    assert description is not None
+    assert description.startswith("2026/09/05 · 文件名: ")
+    assert description.endswith("...")
+    assert len(description) == 100
+
+
+def test_download_select_uses_na_for_missing_filename():
+    resource = make_resource(1, version="v1")
+    resource.filename = None
+
+    view = ResourceSelectView([resource])
+
+    assert view.children[0].options[0].description == (
+        "2026/09/05 · 文件名: N/A"
+    )
 
 
 @pytest.mark.asyncio
