@@ -154,6 +154,8 @@ class ManagementService(BaseService):
             raise ValueError("找不到资源的私密仓库。")
         thread_id = thread.id
         trace_enabled = resource.trace_enabled
+        # Discord 的 filename 可能移除中文；title 保留上传时的名称。
+        filename = attachment.title or attachment.filename
 
         if trace_enabled:
             trace = getattr(self.bot, "traceability_service", None)
@@ -161,11 +163,11 @@ class ManagementService(BaseService):
                 raise ValueError("动态溯源服务不可用，暂时无法换源。")
             UploadService._validate_trace_attachment_sizes([attachment])
             data = await attachment.read()
-            UploadService._validate_trace_source_data(attachment.filename, data)
-            trace.validate_character_card(attachment.filename, data)
-            upload_file = discord.File(io.BytesIO(data), filename=attachment.filename)
+            UploadService._validate_trace_source_data(filename, data)
+            trace.validate_character_card(filename, data)
+            upload_file = discord.File(io.BytesIO(data), filename=filename)
         else:
-            upload_file = await attachment.to_file()
+            upload_file = await attachment.to_file(filename=filename)
 
         new_message = None
         try:
@@ -181,7 +183,7 @@ class ManagementService(BaseService):
                     Resource.source_message_id == expected_source_message_id,
                 ).values(
                     source_message_id=new_message.id,
-                    filename=attachment.filename,
+                    filename=filename,
                 ).execution_options(synchronize_session=False),
             )
             if result.rowcount != 1:
