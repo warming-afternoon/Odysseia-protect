@@ -20,10 +20,16 @@ logger = logging.getLogger(__name__)
 class ManagementModal(discord.ui.Modal, title="编辑资源信息"):
     """一个用于编辑资源信息的弹出式模态框。"""
 
-    def __init__(self, resource: Resource, service: "ManagementService"):
+    def __init__(
+        self,
+        resource: Resource,
+        service: "ManagementService",
+        management_view: "ManagementView | None" = None,
+    ):
         super().__init__()
         self.resource = resource
         self.service = service
+        self.management_view = management_view
 
         self.version_info_input = discord.ui.TextInput(
             label="版本信息",
@@ -71,6 +77,49 @@ class ManagementModal(discord.ui.Modal, title="编辑资源信息"):
                     "❌ 更新过程中发生内部错误。", ephemeral=True
                 )
 
+        if self.management_view is not None:
+            await self.management_view.refresh(interaction)
+
+
+class ReplaceSourceModal(discord.ui.Modal, title="换源"):
+    def __init__(self, resource: Resource, view: "ManagementView"):
+        super().__init__(timeout=300)
+        self.management_view = view
+        self.resource_id = resource.id
+        self.expected_source_message_id = resource.source_message_id
+        self.file_input = discord.ui.FileUpload(
+            min_values=1, max_values=1, required=True
+        )
+        self.add_item(
+            discord.ui.Label(
+                text=f"版本：{resource.version_info}"[:45],
+                description=f"原文件：{resource.filename}"[:100],
+                component=self.file_input,
+            )
+        )
+        self.add_item(discord.ui.TextDisplay(
+            "提交即替换此版本的文件，保留版本信息、密码、下载次数和保护设置。"
+        ))
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            if len(self.file_input.values) != 1:
+                raise ValueError("请上传且仅上传一个文件。")
+            async with AsyncSessionLocal() as session:
+                result = await self.management_view.service.replace_resource_source(
+                    session, resource_id=self.resource_id, interaction=interaction,
+                    attachment=self.file_input.values[0],
+                    expected_source_message_id=self.expected_source_message_id,
+                )
+        except ValueError as exc:
+            result = f"❌ {exc}"
+        except Exception:
+            logger.exception("资源 %s 换源失败", self.resource_id)
+            result = "❌ 换源失败，原资源未替换，请稍后重试。"
+        await interaction.followup.send(result, ephemeral=True)
+        await self.management_view.refresh(interaction)
+
 
 class DeleteConfirmationView(discord.ui.View):
     """一个用于确认资源删除操作的视图。"""
@@ -117,7 +166,8 @@ class DeleteConfirmationView(discord.ui.View):
 
             # 无论成功失败，都刷新管理面板
             refreshed_panel = await self.service.handle_management_request(
-                session, interaction=self.original_interaction
+                session, interaction=self.original_interaction,
+                selected_resource_id=self.resource.id,
             )
             await self.original_interaction.edit_original_response(**refreshed_panel)
 
@@ -130,7 +180,8 @@ class DeleteConfirmationView(discord.ui.View):
 
         async with AsyncSessionLocal() as session:
             refreshed_panel = await self.service.handle_management_request(
-                session, interaction=self.original_interaction
+                session, interaction=self.original_interaction,
+                selected_resource_id=self.resource.id,
             )
             await self.original_interaction.edit_original_response(**refreshed_panel)
 
@@ -144,6 +195,7 @@ class ManagementView(discord.ui.View):
         service: "ManagementService",
         original_interaction: discord.Interaction,
         thread: "Thread",
+        selected_resource_id: Optional[int] = None,
     ):
         super().__init__(timeout=300)  # 5分钟后超时
         self.resources = {r.id: r for r in resources}
@@ -156,10 +208,13 @@ class ManagementView(discord.ui.View):
         if self.resources:
             self.select_menu = self.ResourceManagementSelect(resources)
             self.edit_button = self.EditButton()
+            self.replace_button = self.ReplaceButton()
             self.delete_button = self.DeleteButton()
             self.add_item(self.select_menu)
             self.add_item(self.edit_button)
+            self.add_item(self.replace_button)
             self.add_item(self.delete_button)
+            self.set_selection(selected_resource_id)
 
         # # 总是添加反应墙管理组件
         # self.toggle_reaction_button = self.ToggleReactionWallButton(thread)
@@ -170,6 +225,32 @@ class ManagementView(discord.ui.View):
         # 添加快捷模式按钮
         self.toggle_quick_mode_button = self.ToggleQuickModeButton(thread)
         self.add_item(self.toggle_quick_mode_button)
+
+    def set_selection(self, resource_id: Optional[int]):
+        resource = self.resources.get(resource_id)
+        self.selected_resource_id = resource.id if resource else None
+        for option in self.select_menu.options:
+            option.default = option.value == str(self.selected_resource_id)
+        self.edit_button.disabled = resource is None
+        self.delete_button.disabled = resource is None
+        self.replace_button.disabled = (
+            resource is None or resource.upload_mode != UploadMode.SECURE
+        )
+
+    async def refresh(self, interaction: discord.Interaction):
+        try:
+            async with AsyncSessionLocal() as session:
+                panel = await self.service.handle_management_request(
+                    session, interaction=self.original_interaction,
+                    selected_resource_id=self.selected_resource_id,
+                )
+            await self.original_interaction.edit_original_response(**panel)
+            self.stop()
+        except Exception:
+            logger.exception("刷新管理面板失败")
+            await interaction.followup.send(
+                "管理面板刷新失败，请重新使用 `/管理` 查看最新状态。", ephemeral=True,
+            )
 
     async def on_timeout(self):
         """超时后禁用所有组件。"""
@@ -207,21 +288,20 @@ class ManagementView(discord.ui.View):
                 placeholder="请选择要操作的资源...",
                 options=options,
                 disabled=not options,  # 如果没有选项，禁用菜单
+                row=0,
             )
 
         async def callback(self, interaction: discord.Interaction):
             if not isinstance(self.view, ManagementView):
                 return
             view = self.view
-            view.selected_resource_id = int(self.values[0])
-            view.edit_button.disabled = False
-            view.delete_button.disabled = False
+            view.set_selection(int(self.values[0]))
             await interaction.response.edit_message(view=view)
 
     class EditButton(discord.ui.Button):
         def __init__(self):
             super().__init__(
-                label="编辑", style=discord.ButtonStyle.primary, disabled=True
+                label="编辑", style=discord.ButtonStyle.primary, disabled=True, row=1,
             )
 
         async def callback(self, interaction: discord.Interaction):
@@ -231,13 +311,31 @@ class ManagementView(discord.ui.View):
             if view.selected_resource_id is not None:
                 resource = view.resources.get(view.selected_resource_id)
                 if resource:
-                    modal = ManagementModal(resource, view.service)
+                    modal = ManagementModal(resource, view.service, view)
                     await interaction.response.send_modal(modal)
+
+    class ReplaceButton(discord.ui.Button):
+        def __init__(self):
+            super().__init__(
+                label="换源",
+                style=discord.ButtonStyle.primary,
+                disabled=True,
+                row=1,
+            )
+
+        async def callback(self, interaction: discord.Interaction):
+            if not isinstance(self.view, ManagementView):
+                return
+            resource = self.view.resources.get(self.view.selected_resource_id)
+            if resource is not None and resource.upload_mode == UploadMode.SECURE:
+                await interaction.response.send_modal(
+                    ReplaceSourceModal(resource, self.view)
+                )
 
     class DeleteButton(discord.ui.Button):
         def __init__(self):
             super().__init__(
-                label="删除", style=discord.ButtonStyle.danger, disabled=True
+                label="删除", style=discord.ButtonStyle.danger, disabled=True, row=1,
             )
 
         async def callback(self, interaction: discord.Interaction):
@@ -394,7 +492,8 @@ class ManagementView(discord.ui.View):
                     await session.commit()
 
                     refreshed_panel = await service.handle_management_request(
-                        session, interaction=original_interaction
+                        session, interaction=original_interaction,
+                        selected_resource_id=view.selected_resource_id,
                     )
                     await original_interaction.edit_original_response(**refreshed_panel)
 

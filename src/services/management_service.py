@@ -3,10 +3,12 @@
 管理服务，负责处理资源管理相关的业务逻辑。
 """
 
+import io
 import logging
 from typing import Any, Optional
 
 import discord
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database.models import Resource, UploadMode
@@ -21,7 +23,8 @@ class ManagementService(BaseService):
     """封装了所有与资源管理相关的业务逻辑。"""
 
     async def handle_management_request(
-        self, session: AsyncSession, *, interaction: discord.Interaction
+        self, session: AsyncSession, *, interaction: discord.Interaction,
+        selected_resource_id: int | None = None,
     ) -> dict[str, Any]:
         """处理 /管理 命令的请求，返回管理视图。"""
         if not interaction.channel or not isinstance(
@@ -114,8 +117,99 @@ class ManagementService(BaseService):
                 name = "📄 资源" if i == 0 else "📄 资源 (续)"
                 embed.add_field(name=name, value=chunk, inline=False)
 
-        view = ManagementView(resources, self, interaction, thread_model)
+        view = ManagementView(
+            resources, self, interaction, thread_model,
+            selected_resource_id=selected_resource_id,
+        )
         return {"embed": embed, "view": view}
+
+    async def replace_resource_source(
+        self,
+        session: AsyncSession,
+        *,
+        resource_id: int,
+        interaction: discord.Interaction,
+        attachment: discord.Attachment,
+        expected_source_message_id: int,
+    ) -> str:
+        """提交换源事务后才清理旧文件；调用方必须提供独立会话。"""
+        from src.services.upload_service import UploadService
+
+        resource = await self.resource_repo.get_with_thread(session, id=resource_id)
+        if resource is None:
+            raise ValueError("资源已被删除，请刷新管理面板。")
+        thread = resource.thread
+        if (
+            thread.author_id != interaction.user.id
+            or thread.public_thread_id != interaction.channel_id
+            or thread.guild_id not in (None, interaction.guild_id)
+        ):
+            raise ValueError("只有本帖作者能在原帖中换源。")
+        if resource.upload_mode != UploadMode.SECURE:
+            raise ValueError("仅受保护资源支持换源。")
+        if resource.source_message_id != expected_source_message_id:
+            raise ValueError("资源已被换源，请刷新面板后重试。")
+        warehouse_id = thread.warehouse_thread_id
+        if not warehouse_id:
+            raise ValueError("找不到资源的私密仓库。")
+        thread_id = thread.id
+        trace_enabled = resource.trace_enabled
+
+        if trace_enabled:
+            trace = getattr(self.bot, "traceability_service", None)
+            if trace is None or not trace.available:
+                raise ValueError("动态溯源服务不可用，暂时无法换源。")
+            UploadService._validate_trace_attachment_sizes([attachment])
+            data = await attachment.read()
+            UploadService._validate_trace_source_data(attachment.filename, data)
+            trace.validate_character_card(attachment.filename, data)
+            upload_file = discord.File(io.BytesIO(data), filename=attachment.filename)
+        else:
+            upload_file = await attachment.to_file()
+
+        new_message = None
+        try:
+            channel = await self.bot.fetch_channel(warehouse_id)
+            if not isinstance(channel, (discord.TextChannel, discord.Thread)):
+                raise ValueError("资源仓库频道类型无效。")
+            new_message = await channel.send(file=upload_file)
+            result = await session.execute(
+                update(Resource).where(
+                    Resource.id == resource_id,
+                    Resource.thread_id == thread_id,
+                    Resource.upload_mode == UploadMode.SECURE,
+                    Resource.source_message_id == expected_source_message_id,
+                ).values(
+                    source_message_id=new_message.id,
+                    filename=attachment.filename,
+                ).execution_options(synchronize_session=False),
+            )
+            if result.rowcount != 1:
+                raise ValueError("资源已被删除或换源，请刷新面板后重试。")
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            if new_message is not None:
+                try:
+                    await new_message.delete()
+                except Exception:
+                    logger.exception("清理未提交的换源文件失败: %s", new_message.id)
+            raise
+        finally:
+            upload_file.close()
+
+        try:
+            old_message = await channel.fetch_message(expected_source_message_id)
+            await old_message.delete()
+        except discord.NotFound:
+            pass
+        except Exception:
+            logger.exception("换源成功，但旧仓库消息清理失败: %s", expected_source_message_id)
+            return (
+                "✅ 换源成功！原有设置和下载次数已保留。\n"
+                "⚠️ 旧仓库文件清理失败，请联系管理员处理。"
+            )
+        return "✅ 换源成功！原有设置和下载次数已保留。"
 
     async def update_resource(
         self,
