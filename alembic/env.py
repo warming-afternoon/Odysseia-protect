@@ -12,7 +12,7 @@ from alembic import context
 # This line is crucial for alembic to find your models
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.database.models import Base
+from src.models import Base
 from src.database.database import DATABASE_URL  # 从您的项目中导入数据库URL
 
 # this is the Alembic Config object, which provides

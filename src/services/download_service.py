@@ -10,7 +10,7 @@ from typing import Any, Optional, Union
 import discord
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.database.models import UploadMode
+from src.enums import UploadMode
 from src.dto.resource_dto import ResourceDTO
 from src.services.base import BaseService
 from src.services.delivery_service import DeliveryResult

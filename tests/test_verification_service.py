@@ -152,7 +152,8 @@ def test_report_artifacts_are_chinese_and_rename_downloader_id():
     assert "凭证无效" in markdown
     assert "已跳过" in markdown
     assert "水印层不完整" in markdown
-    assert "仅作为泄露调查证据" in markdown
+    assert "- 已发现水印层：`json:ccv3`、`png:trAc`" in markdown
+    assert "- 缺失水印层：`json:chara`" in markdown
 
     details = json.loads(artifacts.details_json)
     payload = details["records"][0]["payload"]

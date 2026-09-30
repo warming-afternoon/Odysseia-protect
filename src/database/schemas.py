@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 from src.enums import SourceStatus
 
-from .models import UploadMode
+from src.enums import UploadMode
 
 # ==================================
 # Thread Schemas

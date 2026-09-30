@@ -11,10 +11,12 @@ import discord
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.database.models import Resource, UploadMode
+from src.models import Resource
+from src.enums import UploadMode
 from src.services.base import BaseService
 from src.ui.management_ui import ManagementView
 from src.utils.formatting import format_resource_list_chunks
+from src.utils.auth import require_thread_manager
 
 logger = logging.getLogger(__name__)
 
@@ -48,14 +50,15 @@ class ManagementService(BaseService):
             )
             return {"embed": embed}
 
-        # 权限检查：只有帖子的作者才能管理资源
-        if thread_model.author_id != interaction.user.id:
-            embed = discord.Embed(
-                title="🚫 权限不足",
-                description="抱歉，只有本帖的作者才能管理这里的资源。",
-                color=discord.Color.red(),
+        try:
+            await require_thread_manager(
+                session, interaction=interaction, thread_repo=self.thread_repo,
+                thread_model=thread_model,
             )
-            return {"embed": embed}
+        except PermissionError as exc:
+            return {"embed": discord.Embed(
+                title="🚫 权限不足", description=str(exc), color=discord.Color.red(),
+            )}
 
         # 获取该帖子的所有资源
         resources = await self.resource_repo.get_by_thread_id(
@@ -139,12 +142,10 @@ class ManagementService(BaseService):
         if resource is None:
             raise ValueError("资源已被删除，请刷新管理面板。")
         thread = resource.thread
-        if (
-            thread.author_id != interaction.user.id
-            or thread.public_thread_id != interaction.channel_id
-            or thread.guild_id not in (None, interaction.guild_id)
-        ):
-            raise ValueError("只有本帖作者能在原帖中换源。")
+        await require_thread_manager(
+            session, interaction=interaction, thread_repo=self.thread_repo,
+            thread_model=thread,
+        )
         if resource.upload_mode != UploadMode.SECURE:
             raise ValueError("仅受保护资源支持换源。")
         if resource.source_message_id != expected_source_message_id:
@@ -218,13 +219,17 @@ class ManagementService(BaseService):
         session: AsyncSession,
         *,
         resource_id: int,
+        interaction: discord.Interaction,
         version_info: str,
         password: Optional[str],
     ) -> Optional[Resource]:
         """根据 ID 更新一个资源的信息。"""
-        db_obj = await self.resource_repo.get(session, id=resource_id)
+        db_obj = await self.resource_repo.get_with_thread(session, id=resource_id)
         if not db_obj:
             return None
+        await require_thread_manager(
+            session, interaction=interaction, thread_repo=self.thread_repo, thread_model=db_obj.thread,
+        )
 
         update_data = {"version_info": version_info, "password": password}
         updated_resource = await self.resource_repo.update(
@@ -232,7 +237,9 @@ class ManagementService(BaseService):
         )
         return updated_resource
 
-    async def delete_resource(self, session: AsyncSession, *, resource_id: int) -> bool:
+    async def delete_resource(
+        self, session: AsyncSession, *, resource_id: int, interaction: discord.Interaction,
+    ) -> bool:
         """
         根据 ID 删除一个资源。
         此操作会先尝试删除 Discord 上的源消息，然后再删除数据库记录。
@@ -245,6 +252,11 @@ class ManagementService(BaseService):
         if not resource_to_delete:
             logger.warning(f"尝试删除一个不存在的资源，ID: {resource_id}")
             return False
+
+        await require_thread_manager(
+            session, interaction=interaction, thread_repo=self.thread_repo,
+            thread_model=resource_to_delete.thread,
+        )
 
         # 步骤 2: 如果是受保护文件，尝试删除 Discord 上的源文件消息 (尽力而为)
         if resource_to_delete.upload_mode == UploadMode.SECURE:
@@ -291,3 +303,15 @@ class ManagementService(BaseService):
         if deleted_obj:
             logger.info(f"成功从数据库删除资源 {resource_id}")
         return deleted_obj is not None
+
+    async def toggle_quick_mode(self, session: AsyncSession, *, thread_id: int,
+                                interaction: discord.Interaction) -> None:
+        thread = await self.thread_repo.get(session, id=thread_id)
+        if thread is None:
+            raise ValueError("找不到帖子，请重新打开管理面板。")
+        await require_thread_manager(
+            session, interaction=interaction, thread_repo=self.thread_repo, thread_model=thread,
+        )
+        await self.thread_repo.update(
+            session, db_obj=thread, obj_in={"quick_mode_enabled": not thread.quick_mode_enabled},
+        )

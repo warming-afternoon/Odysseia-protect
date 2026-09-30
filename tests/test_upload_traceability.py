@@ -64,6 +64,9 @@ def _upload_fixture():
     interaction = MagicMock()
     interaction.channel = MagicMock(spec=discord.Thread)
     interaction.user.id = 123
+    interaction.channel.id = 10
+    interaction.channel.owner_id = 123
+    interaction.guild.id = 1
     return service, resource_repo, warehouse, interaction
 
 
@@ -111,7 +114,7 @@ def test_trace_upload_allows_exact_size_metadata():
 async def test_trace_upload_rechecks_actual_bytes_after_reading():
     service, resource_repo, warehouse, interaction = _upload_fixture()
     service._get_or_create_thread = AsyncMock(
-        return_value=SimpleNamespace(id=5, author_id=interaction.user.id)
+        return_value=SimpleNamespace(id=5, author_id=interaction.user.id, public_thread_id=10, guild_id=1)
     )
     attachment = MagicMock(spec=discord.Attachment)
     attachment.filename = "mismatch.png"
@@ -143,7 +146,7 @@ async def test_trace_upload_rechecks_actual_bytes_after_reading():
 async def test_trace_batch_rejects_all_before_reading_when_one_file_is_oversize():
     service, resource_repo, warehouse, interaction = _upload_fixture()
     service._get_or_create_thread = AsyncMock(
-        return_value=SimpleNamespace(id=5, author_id=interaction.user.id)
+        return_value=SimpleNamespace(id=5, author_id=interaction.user.id, public_thread_id=10, guild_id=1)
     )
     small = MagicMock(spec=discord.Attachment)
     small.filename = "small.png"

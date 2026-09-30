@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from sqlalchemy.orm import joinedload
 
-from ..models import Resource
+from src.models import Resource
 from ..schemas import ResourceCreate, ResourceUpdate
 from .base import BaseRepository
 

@@ -10,7 +10,8 @@ from typing import Sequence
 import discord
 
 from src.database.database import AsyncSessionLocal
-from src.database.models import Resource, UploadMode
+from src.models import Resource
+from src.enums import UploadMode
 from src.database.repositories.resource import ResourceRepository
 from src.ui.password_input_modal import DownloadResponseMode, PasswordModal
 from src.dto.resource_dto import ResourceDTO

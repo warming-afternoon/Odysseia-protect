@@ -2,7 +2,7 @@
 
 # You can also make imports available at the package level for convenience
 from .database import Base, get_db_session, init_db, AsyncSessionLocal
-from .models import Resource, Thread
+from src.models import Resource, Thread
 
 
 # Define what is exposed when somebody does 'from database import *'

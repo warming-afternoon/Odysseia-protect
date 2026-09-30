@@ -6,7 +6,7 @@
 from typing import Sequence, Union
 import discord
 
-from src.database.models import Resource
+from src.models import Resource
 
 def format_resource_list_chunks(
     resource_list: Sequence[Resource],

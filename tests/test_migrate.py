@@ -159,6 +159,53 @@ def test_sqlite_backup_includes_committed_wal_data(database_path):
         backup_path.unlink(missing_ok=True)
 
 
+def test_upgrade_current_head_preserves_resources_and_users(database_path):
+    """验证协作者迁移的升级和回退均保留已有帖子、资源与用户数据。"""
+    from contextlib import closing
+    from sqlalchemy import create_engine
+    from src.models import Base
+
+    # 排除协作者表来构造升级前的数据库结构。
+    engine = create_engine(f"sqlite:///{database_path.as_posix()}")
+    try:
+        Base.metadata.create_all(engine, tables=[
+            table for table in Base.metadata.sorted_tables if table.name != "author_collaborators"
+        ])
+    finally:
+        engine.dispose()
+    # 写入旧迁移版本和具有密码、下载计数的资源，保存数据快照供比较。
+    with closing(sqlite3.connect(str(database_path))) as conn:
+        conn.executescript("""
+            CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY);
+            INSERT INTO alembic_version VALUES ('e4c6b8d0f2a1');
+            INSERT INTO threads (id, public_thread_id, author_id, quick_mode_enabled, created_at)
+                VALUES (1, 123, 456, 1, CURRENT_TIMESTAMP);
+            INSERT INTO resources (id, thread_id, upload_mode, version_info, filename,
+                source_message_id, password, download_count, created_at)
+                VALUES (1, 1, 'SECURE', 'v1', 'file.zip', 789, 'secret', 42, CURRENT_TIMESTAMP);
+            INSERT INTO users (id, has_agreed_to_privacy_policy, has_agreed_to_wishlist_policy, created_at)
+                VALUES (456, 1, 0, CURRENT_TIMESTAMP);
+        """)
+        before = {name: conn.execute(f"SELECT * FROM {name}").fetchall()
+                  for name in ("threads", "resources", "users")}
+    # 将迁移命令指向临时数据库，分别执行升级与回退。
+    env = os.environ.copy()
+    env["DATABASE_URL"] = f"sqlite+aiosqlite:///{database_path.resolve().as_posix()}"
+    for action, target in (("upgrade", "head"), ("downgrade", "e4c6b8d0f2a1")):
+        result = subprocess.run(
+            [sys.executable, "-m", "alembic", action, target],
+            cwd=Path(__file__).resolve().parents[1], env=env,
+            capture_output=True, text=True, encoding="utf-8",
+        )
+        assert result.returncode == 0, result.stderr
+        # 每次迁移后检查原数据完全保留，授权表仅在升级后存在。
+        with closing(sqlite3.connect(str(database_path))) as conn:
+            assert {name: conn.execute(f"SELECT * FROM {name}").fetchall()
+                    for name in before} == before
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            assert ("author_collaborators" in tables) is (action == "upgrade")
+
+
 def test_upgrade_adds_thread_source_metadata_to_wishlist_head(database_path):
     conn = sqlite3.connect(str(database_path))
     conn.executescript(
@@ -216,6 +263,12 @@ def test_upgrade_adds_thread_source_metadata_to_wishlist_head(database_path):
         ).fetchone() == (None, None, "unknown")
         assert conn.execute(
             "SELECT version_num FROM alembic_version"
-        ).fetchone() == ("e4c6b8d0f2a1",)
+        ).fetchone() == ("a9c2e5f8b1d4",)
+        assert conn.execute("SELECT author_id FROM threads").fetchone() == (456,)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(author_collaborators)")}
+        assert {"author_id", "collaborator_id", "granted_by", "created_at"} <= columns
+        conn.execute("INSERT INTO author_collaborators (author_id, collaborator_id, granted_by) VALUES (456, 789, 456)")
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute("INSERT INTO author_collaborators (author_id, collaborator_id, granted_by) VALUES (456, 789, 456)")
     finally:
         conn.close()

@@ -9,7 +9,18 @@ from typing import Sequence, Optional, TYPE_CHECKING
 import discord
 
 from src.database.database import AsyncSessionLocal
-from src.database.models import Resource, Thread, UploadMode
+from src.models import Resource, Thread
+from src.enums import UploadMode
+from src.utils.auth import require_thread_manager, send_private_error
+
+
+async def check_management_actor(interaction, original_interaction) -> bool:
+    if (interaction.user.id != original_interaction.user.id
+            or interaction.channel.id != original_interaction.channel.id):
+        await send_private_error(interaction, "此管理面板仅供发起人在原帖内使用。")
+        return False
+    return True
+
 
 if TYPE_CHECKING:
     from src.services.management_service import ManagementService
@@ -24,7 +35,7 @@ class ManagementModal(discord.ui.Modal, title="编辑资源信息"):
         self,
         resource: Resource,
         service: "ManagementService",
-        management_view: "ManagementView | None" = None,
+        management_view: "ManagementView",
     ):
         super().__init__()
         self.resource = resource
@@ -51,12 +62,15 @@ class ManagementModal(discord.ui.Modal, title="编辑资源信息"):
 
     async def on_submit(self, interaction: discord.Interaction):
         """当用户提交模态框时，调用服务层更新资源。"""
+        if not await check_management_actor(interaction, self.management_view.original_interaction):
+            return
         await interaction.response.defer(ephemeral=True)
         async with AsyncSessionLocal() as session:
             try:
                 updated = await self.service.update_resource(
                     session,
                     resource_id=self.resource.id,
+                    interaction=interaction,
                     version_info=self.version_info_input.value,
                     password=self.password_input.value or None,
                 )
@@ -69,6 +83,9 @@ class ManagementModal(discord.ui.Modal, title="编辑资源信息"):
                     await interaction.followup.send(
                         "❌ 更新失败，找不到该资源。", ephemeral=True
                     )
+            except PermissionError as exc:
+                await session.rollback()
+                await send_private_error(interaction, str(exc))
             except Exception as e:
                 # 如果发生错误，回滚事务
                 await session.rollback()
@@ -102,6 +119,8 @@ class ReplaceSourceModal(discord.ui.Modal, title="换源"):
         ))
 
     async def on_submit(self, interaction: discord.Interaction):
+        if not await check_management_actor(interaction, self.management_view.original_interaction):
+            return
         await interaction.response.defer(ephemeral=True)
         try:
             if len(self.file_input.values) != 1:
@@ -112,7 +131,7 @@ class ReplaceSourceModal(discord.ui.Modal, title="换源"):
                     attachment=self.file_input.values[0],
                     expected_source_message_id=self.expected_source_message_id,
                 )
-        except ValueError as exc:
+        except (ValueError, PermissionError) as exc:
             result = f"❌ {exc}"
         except Exception:
             logger.exception("资源 %s 换源失败", self.resource_id)
@@ -135,17 +154,35 @@ class DeleteConfirmationView(discord.ui.View):
         self.service = service
         self.original_interaction = original_interaction
 
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if not await check_management_actor(interaction, self.original_interaction):
+            return False
+        async with AsyncSessionLocal() as session:
+            resource = await self.service.resource_repo.get_with_thread(session, id=self.resource.id)
+            if resource is None:
+                await send_private_error(interaction, "资源已被删除，请重新打开管理面板。")
+                return False
+            try:
+                await require_thread_manager(session, interaction=interaction,
+                                             thread_model=resource.thread)
+            except PermissionError as exc:
+                await send_private_error(interaction, str(exc))
+                return False
+        return True
+
     @discord.ui.button(label="确认删除", style=discord.ButtonStyle.danger)
     async def confirm_delete(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
         """执行删除，然后刷新并返回管理面板。"""
+        if not await check_management_actor(interaction, self.original_interaction):
+            return
         await interaction.response.defer()  # 立即响应交互
 
         async with AsyncSessionLocal() as session:
             try:
                 success = await self.service.delete_resource(
-                    session, resource_id=self.resource.id
+                    session, resource_id=self.resource.id, interaction=interaction,
                 )
                 if success:
                     await session.commit()
@@ -157,6 +194,9 @@ class DeleteConfirmationView(discord.ui.View):
                     await interaction.followup.send(
                         "❌ 删除失败，找不到该资源。", ephemeral=True
                     )
+            except PermissionError as exc:
+                await session.rollback()
+                await send_private_error(interaction, str(exc))
             except Exception as e:
                 await session.rollback()
                 logger.error(f"删除资源 {self.resource.id} 时发生错误", exc_info=e)
@@ -169,6 +209,7 @@ class DeleteConfirmationView(discord.ui.View):
                 session, interaction=self.original_interaction,
                 selected_resource_id=self.resource.id,
             )
+            refreshed_panel.setdefault("view", None)
             await self.original_interaction.edit_original_response(**refreshed_panel)
 
     @discord.ui.button(label="取消", style=discord.ButtonStyle.secondary)
@@ -183,6 +224,7 @@ class DeleteConfirmationView(discord.ui.View):
                 session, interaction=self.original_interaction,
                 selected_resource_id=self.resource.id,
             )
+            refreshed_panel.setdefault("view", None)
             await self.original_interaction.edit_original_response(**refreshed_panel)
 
 
@@ -226,6 +268,21 @@ class ManagementView(discord.ui.View):
         self.toggle_quick_mode_button = self.ToggleQuickModeButton(thread)
         self.add_item(self.toggle_quick_mode_button)
 
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if not await check_management_actor(interaction, self.original_interaction):
+            return False
+        async with AsyncSessionLocal() as session:
+            thread = await self.service.thread_repo.get(session, id=self.thread.id)
+            if thread is None:
+                await send_private_error(interaction, "帖子记录已失效，请重新打开管理面板。")
+                return False
+            try:
+                await require_thread_manager(session, interaction=interaction, thread_model=thread)
+            except PermissionError as exc:
+                await send_private_error(interaction, str(exc))
+                return False
+        return True
+
     def set_selection(self, resource_id: Optional[int]):
         resource = self.resources.get(resource_id)
         self.selected_resource_id = resource.id if resource else None
@@ -244,6 +301,7 @@ class ManagementView(discord.ui.View):
                     session, interaction=self.original_interaction,
                     selected_resource_id=self.selected_resource_id,
                 )
+            panel.setdefault("view", None)
             await self.original_interaction.edit_original_response(**panel)
             self.stop()
         except Exception:
@@ -473,21 +531,8 @@ class ManagementView(discord.ui.View):
 
             async with AsyncSessionLocal() as session:
                 try:
-                    fresh_thread = await service.thread_repo.get(
-                        session, id=thread_to_update.id
-                    )
-                    if not fresh_thread:
-                        await interaction.followup.send(
-                            "❌ 错误：找不到帖子。", ephemeral=True
-                        )
-                        return
-
-                    new_status = not fresh_thread.quick_mode_enabled
-                    update_data = {"quick_mode_enabled": new_status}
-                    await service.thread_repo.update(
-                        session,
-                        db_obj=fresh_thread,
-                        obj_in=update_data,
+                    await service.toggle_quick_mode(
+                        session, thread_id=thread_to_update.id, interaction=interaction,
                     )
                     await session.commit()
 
@@ -495,8 +540,12 @@ class ManagementView(discord.ui.View):
                         session, interaction=original_interaction,
                         selected_resource_id=view.selected_resource_id,
                     )
+                    refreshed_panel.setdefault("view", None)
                     await original_interaction.edit_original_response(**refreshed_panel)
 
+                except (PermissionError, ValueError) as exc:
+                    await session.rollback()
+                    await send_private_error(interaction, str(exc))
                 except Exception as e:
                     await session.rollback()
                     logger.error(

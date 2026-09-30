@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 class ManageCog(commands.Cog):
     """
-    这个 Cog 包含了 `/管理` 命令，用于让作者管理自己上传的资源。
+    这个 Cog 包含了 `/管理` 命令，用于让原作者及协作者维护帖内资源。
     """
 
     def __init__(self, bot: "OdysseiaProtect"):
@@ -28,7 +28,7 @@ class ManageCog(commands.Cog):
         # 这是一个常见的依赖注入模式
         self.management_service: ManagementService = self.bot.management_service
 
-    @app_commands.command(name="管理", description="管理您在此帖上传的资源。")
+    @app_commands.command(name="管理", description="原作者或协作者管理本帖的资源和设置。")
     async def manage(self, interaction: discord.Interaction):
         """
         处理 /管理 命令的核心函数。

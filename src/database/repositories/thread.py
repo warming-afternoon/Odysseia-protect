@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.enums import SourceStatus
 
-from ..models import Thread
+from src.models import Thread
 from ..schemas import ThreadCreate, ThreadUpdate
 from .base import BaseRepository
 

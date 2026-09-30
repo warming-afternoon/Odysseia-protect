@@ -8,7 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.cogs.wishlist_cog import WishlistCog
-from src.database.models import UploadMode, WishlistItem
+from src.models import WishlistItem
+from src.enums import UploadMode
 from src.database.repositories.resource import ResourceRepository
 from src.database.repositories.thread import ThreadRepository
 from src.database.repositories.user import UserRepository

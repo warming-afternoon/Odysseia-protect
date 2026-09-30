@@ -10,6 +10,7 @@ import discord
 
 from src.database.database import AsyncSessionLocal
 from src.database.repositories.user import UserRepository
+from src.utils.auth import assert_thread_manager, send_private_error
 
 if TYPE_CHECKING:
     from src.services.upload_service import UploadService
@@ -27,6 +28,7 @@ class PrivacyPolicyView(discord.ui.View):
     def __init__(
         self,
         user_repo: UserRepository,
+        user_id: int,
         service: "UploadService",
         mode: str,
         file: Optional[Union[discord.Attachment, List[discord.Attachment]]],
@@ -34,12 +36,21 @@ class PrivacyPolicyView(discord.ui.View):
         source_message: Optional[discord.Message] = None,
     ):
         super().__init__(timeout=300)  # 5分钟后超时
+        self.user_id = user_id
         self.user_repo = user_repo
         self.service = service
         self.mode = mode
         self.file = file
         self.message_link = message_link
         self.source_message = source_message
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await send_private_error(interaction, "此上传面板仅供发起人使用。")
+            return False
+        async with AsyncSessionLocal() as session:
+            return await assert_thread_manager(session, interaction=interaction,
+                                               thread_repo=self.service.thread_repo)
 
     @discord.ui.button(label="同意", style=discord.ButtonStyle.success)
     async def agree(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -58,12 +69,13 @@ class PrivacyPolicyView(discord.ui.View):
             assert self.file is not None
             modal = SecureUploadModal(
                 service=self.service,
+                user_id=self.user_id,
                 files=self.file,
                 source_message=self.source_message,
             )
         else:  # normal mode
             modal = NormalUploadModal(
-                service=self.service, message_link=self.message_link
+                service=self.service, message_link=self.message_link, user_id=self.user_id
             )
         await interaction.response.send_modal(modal)
 
@@ -98,11 +110,22 @@ class PrivacyPolicyView(discord.ui.View):
         await interaction.edit_original_response(view=self)
 
 
-class NormalUploadModal(discord.ui.Modal, title="上传普通文件 - 填写信息"):
+class UploadModal(discord.ui.Modal):
+    """上传表单绑定发起人；提交权限由服务层实时校验。"""
+
+    async def check_actor(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await send_private_error(interaction, "此上传表单仅供发起人使用。")
+            return False
+        return True
+
+
+class NormalUploadModal(UploadModal, title="上传普通文件 - 填写信息"):
     """用于普通文件上传的模态框，只包含版本信息。"""
 
-    def __init__(self, service: "UploadService", message_link: Optional[str]):
+    def __init__(self, service: "UploadService", message_link: Optional[str], user_id: int):
         super().__init__()
+        self.user_id = user_id
         self.service = service
         self.message_link = message_link
 
@@ -117,6 +140,8 @@ class NormalUploadModal(discord.ui.Modal, title="上传普通文件 - 填写信�
 
     async def on_submit(self, interaction: discord.Interaction):
         """当用户提交模态框时，调用服务层完成上传流程。"""
+        if not await self.check_actor(interaction):
+            return
         await interaction.response.send_message(
             "⏳ 正在处理您的上传，请稍候...", ephemeral=True
         )
@@ -132,16 +157,18 @@ class NormalUploadModal(discord.ui.Modal, title="上传普通文件 - 填写信�
         await interaction.edit_original_response(content=result_message)
 
 
-class SecureUploadModal(discord.ui.Modal, title="上传受保护文件 - 填写信息"):
+class SecureUploadModal(UploadModal, title="上传受保护文件 - 填写信息"):
     """用于受保护文件上传的模态框，包含版本和密码信息。"""
 
     def __init__(
         self,
         service: "UploadService",
         files: Union[discord.Attachment, List[discord.Attachment]],
+        user_id: int,
         source_message: Optional[discord.Message] = None,
     ):
         super().__init__()
+        self.user_id = user_id
         self.service = service
         self.files = files
         self.source_message = source_message
@@ -173,6 +200,8 @@ class SecureUploadModal(discord.ui.Modal, title="上传受保护文件 - 填写�
 
     async def on_submit(self, interaction: discord.Interaction):
         """当用户提交模态框时，调用服务层完成上传流程。"""
+        if not await self.check_actor(interaction):
+            return
         await interaction.response.send_message(
             "⏳ 正在处理您的上传，请稍候...", ephemeral=True
         )
