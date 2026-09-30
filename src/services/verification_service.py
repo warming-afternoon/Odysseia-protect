@@ -21,7 +21,7 @@ import py7zr
 from sqlalchemy import delete, select, update
 
 from src.database.database import AsyncSessionLocal
-from src.database.models import TraceVerificationJob
+from src.models import TraceVerificationJob
 from src.services.object_store import R2ObjectStore
 from src.services.traceability_service import TraceabilityService
 from src.traceability.watermark import WatermarkError

@@ -7,7 +7,7 @@ from typing import Sequence
 import discord
 
 from src.database.database import AsyncSessionLocal
-from src.database.models import Resource
+from src.models import Resource
 from src.ui.password_input_modal import DownloadResponseMode
 from src.ui.resource_select import ResourceSelect
 from src.ui.wishlist_ui import (

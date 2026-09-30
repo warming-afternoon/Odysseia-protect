@@ -9,7 +9,7 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 
 # Import the Base model so that the test database knows about our tables.
-from src.database.models import Base
+from src.models import Base
 
 # Use an in-memory SQLite database for all tests to ensure isolation and speed.
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"

@@ -5,7 +5,7 @@ from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
-from ..models import Resource, WishlistItem
+from src.models import Resource, WishlistItem
 from ..schemas import WishlistItemCreate, WishlistItemUpdate
 from .base import BaseRepository
 

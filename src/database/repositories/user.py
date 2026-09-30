@@ -1,4 +1,4 @@
-from ..models import User
+from src.models import User
 from ..schemas import UserCreate, UserUpdate
 from .base import BaseRepository
 

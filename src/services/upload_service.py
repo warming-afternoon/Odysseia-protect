@@ -11,12 +11,13 @@ import discord
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import TRACE_MAX_SOURCE_BYTES, UPLOAD_PRIVACY_POLICY_TEXT
-from src.database.models import UploadMode
+from src.enums import UploadMode
 from src.database.schemas import ResourceCreate, ThreadCreate, UserCreate
 from src.enums import SourceStatus
 from src.services.base import BaseService
 from src.ui.upload_ui import PrivacyPolicyView, NormalUploadModal, SecureUploadModal
 from src.utils.discord_utils import parse_message_link
+from src.utils.auth import require_thread_manager
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +91,9 @@ class UploadService(BaseService):
 
         if not thread_model:
             logger.info(f"帖子 {interaction.channel.id} 不存在，将创建新记录。")
-            author_id = interaction.user.id
+            author_id = await require_thread_manager(
+                session, interaction=interaction, thread_repo=self.thread_repo,
+            )
             thread_data = ThreadCreate(
                 public_thread_id=interaction.channel.id,
                 author_id=author_id,
@@ -150,6 +153,7 @@ class UploadService(BaseService):
                 color=discord.Color.blue(),
             )
             view = PrivacyPolicyView(
+                user_id=interaction.user.id,
                 user_repo=self.user_repo,
                 service=self,
                 mode=mode,
@@ -162,9 +166,9 @@ class UploadService(BaseService):
         # 用户已同意，根据模式返回不同的模态框
         if mode == "secure":
             assert file is not None
-            return SecureUploadModal(service=self, files=file)
+            return SecureUploadModal(service=self, files=file, user_id=interaction.user.id)
         else:  # normal mode
-            return NormalUploadModal(service=self, message_link=message_link)
+            return NormalUploadModal(service=self, message_link=message_link, user_id=interaction.user.id)
 
     async def handle_secure_upload_from_message(
         self,
@@ -189,6 +193,7 @@ class UploadService(BaseService):
             return {
                 "embed": embed,
                 "view": PrivacyPolicyView(
+                    user_id=interaction.user.id,
                     user_repo=self.user_repo,
                     service=self,
                     mode="secure",
@@ -199,7 +204,7 @@ class UploadService(BaseService):
             }
 
         return SecureUploadModal(
-            service=self, files=message.attachments, source_message=message
+            service=self, files=message.attachments, source_message=message, user_id=interaction.user.id
         )
 
     async def handle_upload_submission(
@@ -237,8 +242,10 @@ class UploadService(BaseService):
             thread_model = await self._get_or_create_thread(
                 session, interaction=interaction
             )
-            if thread_model.author_id != interaction.user.id:
-                return "🚫 **权限不足**\n抱歉，只有本帖的作者才能上传资源。"
+            await require_thread_manager(
+                session, interaction=interaction, thread_repo=self.thread_repo,
+                thread_model=thread_model,
+            )
 
             if mode == "secure":
                 # 断言 file 存在，因为 Cog 层已经校验过
@@ -267,6 +274,9 @@ class UploadService(BaseService):
             # 只有在所有数据库操作成功后才提交事务
             await session.commit()
             return result
+        except PermissionError as exc:
+            await session.rollback()
+            return f"🚫 **权限不足**\n{exc}"
         except Exception as e:
             log_identifier_on_error = file.filename if file else "N/A"
             logger.error(
@@ -344,7 +354,7 @@ class UploadService(BaseService):
                 author = interaction.user
                 embed = discord.Embed(
                     title="📦 安全仓库关联信息",
-                    description=f"此仓库与作者 {author.mention} 的上传相关联。",
+                    description=f"此仓库属于原作者 <@{thread_model.author_id}> 的帖子。",
                     color=discord.Color.blue(),
                     timestamp=discord.utils.utcnow(),
                 )
@@ -358,8 +368,9 @@ class UploadService(BaseService):
                     value=f"`{interaction.channel.id}`",
                     inline=False,
                 )
-                embed.add_field(name="👤 作者", value=f"`{str(author)}`", inline=True)
-                embed.add_field(name="🆔 作者 ID", value=f"`{author.id}`", inline=True)
+                embed.add_field(name="👤 原作者", value=f"<@{thread_model.author_id}>", inline=True)
+                embed.add_field(name="🆔 原作者 ID", value=f"`{thread_model.author_id}`", inline=True)
+                embed.add_field(name="📤 上传操作人", value=f"{author.mention} (`{author.id}`)", inline=False)
 
                 # 创建帖子并发送 Embed
                 thread_with_message = await warehouse_forum.create_thread(
@@ -460,6 +471,8 @@ class UploadService(BaseService):
     ) -> str:
         """处理来自多附件上传模态框的提交。"""
         try:
+            if source_message is not None and source_message.channel.id != interaction.channel.id:
+                raise PermissionError("只能转存当前帖子内的消息。")
             thread_model = await self._get_or_create_thread(
                 session, interaction=interaction
             )
@@ -548,8 +561,10 @@ class UploadService(BaseService):
         assert isinstance(interaction.channel, (discord.TextChannel, discord.Thread))
 
         # 1. 权限检查 (thread_model 已从外部传入)
-        if thread_model.author_id != interaction.user.id:
-            raise PermissionError("抱歉，只有本帖的作者才能上传资源。")
+        await require_thread_manager(
+            session, interaction=interaction, thread_repo=self.thread_repo,
+            thread_model=thread_model,
+        )
 
         prepared_attachments: list[tuple[discord.Attachment, bytes | None]] = []
         if trace_enabled:

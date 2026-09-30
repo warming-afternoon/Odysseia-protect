@@ -11,8 +11,19 @@ from src.database.repositories.resource import ResourceRepository
 from src.database.repositories.thread import ThreadRepository
 from src.database.repositories.user import UserRepository
 from src.database.schemas import ResourceCreate, ThreadCreate, UserCreate
-from src.database.models import UploadMode
+from src.enums import UploadMode
 from src.ui.resource_select_view import PublicResourceSelectView, ResourceSelectView
+
+
+def management_interaction(thread):
+    interaction = MagicMock()
+    interaction.user.id = thread.author_id
+    interaction.channel = MagicMock(spec=discord.Thread)
+    interaction.channel.id = thread.public_thread_id
+    interaction.channel.owner_id = thread.author_id
+    interaction.guild.id = thread.guild_id or 123
+    return interaction
+
 
 
 @pytest.mark.asyncio
@@ -318,6 +329,7 @@ class TestManagementServiceExtended:
         updated = await service.update_resource(
             session=db_session,
             resource_id=resource.id,
+            interaction=management_interaction(thread),
             version_info="2.0",
             password="newpass",
         )
@@ -362,6 +374,7 @@ class TestManagementServiceExtended:
         success = await service.delete_resource(
             session=db_session,
             resource_id=resource.id,
+            interaction=management_interaction(thread),
         )
         assert success is True
         # 验证资源已删除
@@ -415,6 +428,7 @@ class TestManagementServiceExtended:
         success = await service.delete_resource(
             session=db_session,
             resource_id=resource.id,
+            interaction=management_interaction(thread),
         )
         assert success is True
         # 验证资源已删除

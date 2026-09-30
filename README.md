@@ -8,6 +8,11 @@
   - **普通文件**：引用帖子内已有的消息附件，仅记录位置，不存储副本。
   - **受保护文件**：将文件上传至私密仓库频道，提供有时效性的下载链接，支持密码保护。
 
+- **协作者授权**
+  - 原作者可给小号或其他维护者授权，管理组可为失联账号安排协作者。
+  - 授权按原作者账号跨服生效，覆盖现有和未来帖子；支持多对多。
+  - 任何人可查看协作者名单，增删仅限原作者和管理组。
+
 - **完整的资源管理**
   - `/上传` – 上传新资源（普通/受保护）。
   - `/下载` – 获取当前帖子的资源列表并下载。
@@ -46,9 +51,17 @@ src/
 │   ├── management_service.py # 管理业务逻辑
 │   └── reaction_wall_service.py # 反应墙逻辑
 ├── database/               # 数据访问层
-│   ├── models.py          # SQLAlchemy ORM 模型
 │   ├── repositories/      # 仓库模式封装数据库操作
 │   └── schemas.py         # Pydantic 数据验证模型
+├── models/                 # SQLAlchemy ORM 模型，一类一文件
+│   ├── base.py             # 共用声明式基类
+│   ├── thread.py           # Thread
+│   ├── resource.py         # Resource
+│   ├── user.py             # User
+│   ├── wishlist_item.py    # WishlistItem
+│   ├── author_collaborator.py # AuthorCollaborator
+│   └── trace_verification_job.py # TraceVerificationJob
+├── enums/                  # 枚举（SourceStatus、UploadMode）
 ├── ui/                     # UI 组件层
 │   ├── upload_ui.py       # 上传相关的 Modal 和 View
 │   ├── download_ui.py     # 下载相关的 View
@@ -125,7 +138,7 @@ CTrl + C
 
 - **流程**：
   1. 检查隐私协议（首次使用）。
-  2. 验证用户是否为帖子作者。
+  2. 验证用户是否为原帖主或其协作者。
   3. 根据子命令弹出相应表单填写版本信息（和密码）。
   4. 完成上传并记录到数据库。
 
@@ -150,6 +163,23 @@ CTrl + C
   - 开启/关闭反应墙。
   - 设置自定义反应表情。
 
+### `/协作者`
+
+所有子命令只在服务器内使用，回复为私密消息。
+
+| 命令 | 用途 | 指定他人原作者 ID 的权限 |
+| --- | --- | --- |
+| `/协作者 添加 用户 [原作者id]` | 添加协作者 | 仅管理组与帖子作者 |
+| `/协作者 移除 用户 [原作者id]` | 撤销协作者权限 | 仅管理组与帖子作者 |
+| `/协作者 列表 [原作者id]` | 查看名单，每页 20 人 | 任何人 |
+
+- 不填 `原作者id` 时操作自己的名单。`用户` 可填 `@用户`、`<@用户ID>` 或数字用户 ID，原作者参数填数字 ID；离服或失联账号不需要被用户选择器找到。
+- 例如：作者使用 `/协作者 添加 用户:@小号` 授权；大号失联时，管理组使用 `/协作者 添加 用户:@小号 原作者id:大号ID`。
+- 授权覆盖原作者在 Bot 所在所有服务器的现有和未来帖子；一个作者可有多个协作者，同一协作者也可维护多个作者。
+- 协作者可上传普通及受保护资源、编辑版本信息和密码、换源、删除资源、切换快捷模式；协作者不能修改原作者的授权名单，授权关系不传递。
+- 管理组复用 `TRACE_ADMIN_USER_IDS`、`TRACE_ADMIN_ROLE_IDS`，可管理任意原作者的全局名单。该权限独立于动态溯源开关，也不会自动赋予资源维护权限。
+- 每位协作者首次上传时需自行同意资源上传协议，不能沿用原作者的同意记录。
+
 ### `/使用手册`
 显示详细的使用手册（内容来自 `src/config.py`）。
 
@@ -160,7 +190,7 @@ CTrl + C
 
 ## 数据库设计
 
-使用 SQLAlchemy ORM，包含三个核心表：
+使用 SQLAlchemy ORM，主要表包括：
 
 - **threads**：帖子关联信息。
   - `public_thread_id`：公开帖子 ID。
@@ -176,6 +206,11 @@ CTrl + C
   - `version_info`：版本信息。
   - `source_message_id`：源消息 ID（普通文件为公开消息 ID，受保护文件为仓库消息 ID）。
   - `password`：下载密码（可选）。
+
+- **author_collaborators**：跨服协作者授权。
+  - `author_id`、`collaborator_id`：原作者及协作者 Discord ID，组合唯一。
+  - `granted_by`、`created_at`：授权操作人及创建时间。
+  - 不依赖用户已使用 Bot，也不关联特定帖子或服务器。
 
 - **users**：用户信息。
   - `id`：Discord 用户 ID。

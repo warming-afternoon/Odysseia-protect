@@ -11,7 +11,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from src.database.database import AsyncSessionLocal
-from src.utils.auth import assert_thread_author
+from src.utils.auth import assert_thread_manager
 
 if TYPE_CHECKING:
     from main import OdysseiaProtect
@@ -76,8 +76,8 @@ class UploadCog(commands.Cog):
             return
 
         async with AsyncSessionLocal() as session:
-            # 权限校验：仅允许帖主上传
-            if not await assert_thread_author(session, interaction=interaction):
+            # 权限校验：允许原帖主及协作者上传
+            if not await assert_thread_manager(session, interaction=interaction):
                 return
 
             # 服务层处理上传
@@ -170,8 +170,8 @@ async def setup(bot: "OdysseiaProtect"):
             return
 
         async with AsyncSessionLocal() as session:
-            # 权限校验：仅允许帖主上传
-            if not await assert_thread_author(session, interaction=interaction):
+            # 权限校验：允许原帖主及协作者上传
+            if not await assert_thread_manager(session, interaction=interaction):
                 return
 
             result = await bot.upload_service.handle_upload(
@@ -228,8 +228,8 @@ async def setup(bot: "OdysseiaProtect"):
             return
 
         async with AsyncSessionLocal() as session:
-            # 权限校验：仅允许帖主上传
-            if not await assert_thread_author(session, interaction=interaction):
+            # 权限校验：允许原帖主及协作者上传
+            if not await assert_thread_manager(session, interaction=interaction):
                 return
             result = await bot.upload_service.handle_secure_upload_from_message(
                 session,

@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 import discord
 import pytest
 
-from src.database.models import UploadMode
+from src.enums import UploadMode
 from src.enums import SourceStatus
 from src.dto.resource_dto import ResourceDTO
 from src.services.download_service import DownloadService

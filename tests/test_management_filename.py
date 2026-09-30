@@ -5,7 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 import discord
 import pytest
 
-from src.database.models import Resource, Thread, UploadMode
+from src.models import Resource, Thread
+from src.enums import UploadMode
 from src.database.repositories.resource import ResourceRepository
 from src.services.management_service import ManagementService
 
@@ -43,9 +44,12 @@ async def test_replace_preserves_attachment_title(db_session, title, expected, t
         title=title, filename="-.png", size=4,
         read=AsyncMock(return_value=b"test"), to_file=AsyncMock(side_effect=to_file),
     )
+    public_thread = MagicMock(spec=discord.Thread)
+    public_thread.id = 10
+    public_thread.owner_id = 30
     await service.replace_resource_source(
         db_session, resource_id=resource_id,
-        interaction=SimpleNamespace(user=SimpleNamespace(id=30), channel_id=10, guild_id=None),
+        interaction=SimpleNamespace(user=SimpleNamespace(id=30), channel=public_thread, guild=SimpleNamespace(id=1)),
         attachment=attachment, expected_source_message_id=40,
     )
 

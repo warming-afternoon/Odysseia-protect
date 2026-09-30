@@ -9,7 +9,7 @@ from typing import Optional
 import discord
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.database.models import Thread
+from src.models import Thread
 from src.services.base import BaseService
 
 logger = logging.getLogger(__name__)

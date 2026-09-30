@@ -3,36 +3,18 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import TYPE_CHECKING
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+from src.utils.auth import is_management_admin as is_trace_admin
+
 if TYPE_CHECKING:
     from main import OdysseiaProtect
 
 logger = logging.getLogger(__name__)
-
-
-def _id_set(name: str) -> set[int]:
-    result: set[int] = set()
-    for value in os.getenv(name, "").split(","):
-        value = value.strip()
-        if value.isdigit():
-            result.add(int(value))
-    return result
-
-
-def is_trace_admin(interaction: discord.Interaction) -> bool:
-    if interaction.guild is None:
-        return False
-    if interaction.user.id in _id_set("TRACE_ADMIN_USER_IDS"):
-        return True
-    allowed_roles = _id_set("TRACE_ADMIN_ROLE_IDS")
-    roles = getattr(interaction.user, "roles", ())
-    return any(role.id in allowed_roles for role in roles)
 
 
 class TraceVerificationModal(discord.ui.Modal, title="溯源样本核验"):

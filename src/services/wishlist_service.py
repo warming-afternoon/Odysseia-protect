@@ -7,7 +7,7 @@ from typing import Literal, Sequence
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.database.models import WishlistItem
+from src.models import WishlistItem
 from src.database.repositories.resource import ResourceRepository
 from src.database.repositories.thread import ThreadRepository
 from src.database.repositories.user import UserRepository

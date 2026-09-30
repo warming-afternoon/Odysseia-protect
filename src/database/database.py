@@ -5,7 +5,7 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 from sqlalchemy import MetaData, String, Table, Column, event, inspect, select
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from sqlalchemy.orm import declarative_base
+from src.models.base import Base
 import logging
 
 from src.enums.path import DB_PATH
@@ -31,11 +31,6 @@ def _enable_wal(dbapi_connection, connection_record):
 AsyncSessionLocal = async_sessionmaker(
     bind=engine, class_=AsyncSession, expire_on_commit=False
 )
-
-# --- 声明式模型基类 ---
-# 我们所有的 ORM 模型都将继承这个 Base 类
-Base = declarative_base()
-
 
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     """

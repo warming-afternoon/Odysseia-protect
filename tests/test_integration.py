@@ -12,7 +12,7 @@ from src.database.repositories.resource import ResourceRepository
 from src.database.repositories.thread import ThreadRepository
 from src.database.repositories.user import UserRepository
 from src.database.schemas import ThreadCreate, UserCreate
-from src.database.models import UploadMode
+from src.enums import UploadMode
 from src.enums import SourceStatus
 from src.services.upload_service import UploadService
 from src.services.download_service import DownloadService
@@ -195,6 +195,7 @@ class TestIntegration:
         mock_interaction.user.id = 222
         mock_interaction.channel = mock_channel
         mock_interaction.response.send_message = AsyncMock()
+        mock_interaction.response.is_done.return_value = False
 
         allowed = await assert_thread_author(
             db_session,
