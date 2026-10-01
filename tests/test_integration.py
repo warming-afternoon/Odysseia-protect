@@ -1,3 +1,4 @@
+from src.ui.download_panel import build_download_panel
 """
 集成测试，验证多个服务之间的协作。
 """
@@ -119,8 +120,8 @@ class TestIntegration:
         assert resource.upload_mode == UploadMode.NORMAL
 
         # 6. 测试下载请求
-        download_result = await download_service.handle_download_request(
-            session=db_session,
+        download_result = await build_download_panel(
+            download_service, session=db_session,
             source=mock_interaction,
         )
         assert "embed" in download_result

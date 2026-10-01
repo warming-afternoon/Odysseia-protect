@@ -7,6 +7,7 @@ from typing import Literal, Sequence
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.enums.wishlist import WISHLIST_PAGE_SIZE
 from src.models import WishlistItem
 from src.database.repositories.resource import ResourceRepository
 from src.database.repositories.thread import ThreadRepository
@@ -18,7 +19,6 @@ from src.services.base import BaseService
 
 logger = logging.getLogger(__name__)
 
-WISHLIST_PAGE_SIZE = 6
 WishlistMutationResult = Literal[
     "added",
     "already_added",

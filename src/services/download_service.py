@@ -1,155 +1,77 @@
-# -*- coding: utf-8 -*-
-"""
-下载服务，负责处理文件下载相关的业务逻辑。
-"""
+"""下载分页、资源详情与文件交付服务。"""
 
 import logging
-from enum import Enum
-from typing import Any, Optional, Union
+import math
 
 import discord
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.enums import UploadMode
+from src.dto.download_page_dto import DOWNLOAD_PAGE_SIZE, DownloadPageDTO
+from src.dto.download_resource_option_dto import DownloadResourceOptionDTO
 from src.dto.resource_dto import ResourceDTO
+from src.enums import UploadMode
+from src.qo.download_page_qo import DownloadPageQo
+from src.qo.resource_selection_qo import ResourceSelectionQo
 from src.services.base import BaseService
 from src.services.delivery_service import DeliveryResult
-from src.ui.resource_select_view import PublicResourceSelectView, ResourceSelectView
-from src.utils.formatting import format_resource_list_chunks
 
 logger = logging.getLogger(__name__)
 
 
-class DownloadPanelMode(Enum):
-    """下载请求所构建的面板类型。"""
-
-    PRIVATE = "private"
-    PUBLIC_GATEWAY = "public_gateway"
-
-
 class DownloadService(BaseService):
-    """封装了所有与资源下载相关的业务逻辑。"""
+    """协调帖子与资源数据并提供下载交付。"""
 
-    async def handle_download_request(
-        self,
-        session: AsyncSession,
-        *,
-        source: Union[discord.Interaction, discord.Message],
-        panel_mode: DownloadPanelMode = DownloadPanelMode.PRIVATE,
-    ) -> dict[str, Any]:
-        """处理 /下载 命令的请求，返回包含 Embed 和 View 的字典。"""
-        if not source.channel or not isinstance(
-            source.channel, (discord.TextChannel, discord.Thread)
-        ):
-            embed = discord.Embed(
-                title="❌ 操作无效",
-                description="此命令只能在服务器的文本频道或帖子中使用。",
-                color=discord.Color.red(),
-            )
-            return {"embed": embed}
+    async def get_page(self, session: AsyncSession, qo: DownloadPageQo) -> DownloadPageDTO:
+        """查询资源页并在会话内转换为独立的分页数据。"""
+        # 一次查询取得共用的帖子元数据，不访问每个资源的关联。
+        thread = await self.thread_repo.get_by_public_thread_id(
+            session, public_thread_id=qo.public_thread_id
+        )
+        if thread is None:
+            return DownloadPageDTO(public_thread_id=qo.public_thread_id)
 
-        thread_model = await self.thread_repo.get_by_public_thread_id(
-            session, public_thread_id=source.channel.id
+        # 统计总数后校正页码，再通过数据库分页读取当前资源。
+        total = await self.resource_repo.count_by_thread_id(session, thread_id=thread.id)
+        max_page = max(1, math.ceil(total / DOWNLOAD_PAGE_SIZE))
+        page = min(qo.page, max_page)
+        resources = await self.resource_repo.get_page_by_thread_id(
+            session, thread_id=thread.id,
+            offset=(page - 1) * DOWNLOAD_PAGE_SIZE, limit=DOWNLOAD_PAGE_SIZE,
+        )
+        return DownloadPageDTO(
+            public_thread_id=qo.public_thread_id, guild_id=thread.guild_id,
+            items=tuple(DownloadResourceOptionDTO.model_validate(r) for r in resources),
+            page=page, total=total, max_page=max_page,
         )
 
-        if not thread_model:
-            embed = discord.Embed(
-                title="📂 暂无资源",
-                description="这个帖子还没有上传任何文件。使用 `/上传` 命令来添加第一个文件吧！",
-                color=discord.Color.blue(),
-            )
-            return {"embed": embed}
-
-        resources = await self.resource_repo.get_by_thread_id(
-            session, thread_id=thread_model.id
+    async def get_selected_resource(
+        self, session: AsyncSession, qo: ResourceSelectionQo
+    ) -> ResourceDTO | None:
+        """校验资源所属帖子并在会话内构建下载详情。"""
+        # 分别查询两个表，避免依赖会话外的延迟关联加载。
+        resource = await self.resource_repo.get(session, id=qo.resource_id)
+        if resource is None:
+            return None
+        thread = await self.thread_repo.get_by_public_thread_id(
+            session, public_thread_id=qo.public_thread_id
         )
-
-        if not resources:
-            embed = discord.Embed(
-                title="📂 暂无资源",
-                description="这个帖子还没有上传任何文件。使用 `/上传` 命令来添加第一个文件吧！",
-                color=discord.Color.blue(),
-            )
-            return {"embed": embed}
-
-        # 按模式分组资源
-        secure_resources = [r for r in resources if r.upload_mode == UploadMode.SECURE]
-        normal_resources = [r for r in resources if r.upload_mode == UploadMode.NORMAL]
-
-        embed = discord.Embed(
-            title="📄 版本选择",
-            description="资源已按模式分类。请从下面的下拉菜单中选择一项进行下载。",
-            color=discord.Color.green(),
+        if thread is None or resource.thread_id != thread.id:
+            return None
+        return ResourceDTO(
+            id=resource.id, filename=resource.filename, version_info=resource.version_info,
+            password=resource.password, source_message_id=resource.source_message_id,
+            warehouse_thread_id=thread.warehouse_thread_id,
+            public_thread_id=thread.public_thread_id, author_id=thread.author_id,
+            guild_id=thread.guild_id, public_thread_name=thread.public_thread_name,
+            source_status=thread.source_status, upload_mode=resource.upload_mode,
+            trace_enabled=resource.trace_enabled,
         )
-        # 按分页块添加受保护资源
-        secure_chunks = format_resource_list_chunks(secure_resources, source=source, show_download_count=False)
-        for i, chunk in enumerate(secure_chunks):
-            name = "🔒 受保护资源" if i == 0 else "🔒 受保护资源 (续)"
-            embed.add_field(name=name, value=chunk, inline=False)
-
-        # 按分页块添加普通资源
-        normal_chunks = format_resource_list_chunks(normal_resources, is_normal_mode=True, source=source)
-        for i, chunk in enumerate(normal_chunks):
-            name = "📄 资源" if i == 0 else "📄 资源 (续)"
-            embed.add_field(name=name, value=chunk, inline=False)
-
-        # 普通和受保护资源都进入版本下拉框；Discord 单个下拉框最多 25 项。
-        if panel_mode is DownloadPanelMode.PUBLIC_GATEWAY:
-            view = PublicResourceSelectView(
-                resources,
-                resource_list_embed=embed,
-            )
-        else:
-            view = ResourceSelectView(
-                resources,
-                resource_list_embed=embed,
-            )
-        return {"embed": embed, "view": view}
-
-    async def create_download_view(
-        self, session: AsyncSession, *, public_thread_id: int
-    ) -> tuple[Optional[discord.ui.View], str]:
-        """
-        Creates a view with a dropdown for users to select a resource to download.
-
-        This method is designed for testing and direct view creation,
-        contrasting with handle_download_request which returns a full dict payload.
-        """
-        thread_model = await self.thread_repo.get_by_public_thread_id(
-            session, public_thread_id=public_thread_id
-        )
-
-        if not thread_model:
-            return None, "此帖还没有任何资源。"
-
-        resources = await self.resource_repo.get_multi_by_thread_id(
-            session, thread_id=thread_model.id
-        )
-
-        if not resources:
-            return None, "此帖还没有任何资源。"
-
-        view = ResourceSelectView(resources)
-        return view, "请选择你要下载的版本："
 
     async def increment_download_count(self, session: AsyncSession, resource_id: int):
-        """
-        为给定资源增加下载计数
-        """
-        db_resource = await self.resource_repo.get(session, id=resource_id)
-
-        # 如果找不到资源，则记录警告并提前返回
-        if not db_resource:
-            logger.warning(
-                f"尝试为资源 ID {resource_id} 增加下载计数，但在数据库中未找到该资源。"
-            )
-            return
-
-        db_resource.download_count += 1
-        session.add(db_resource)  # 将更改暂存，由调用方的上下文管理器负责提交。
-        logger.info(
-            f"资源 {db_resource.id} 的下载计数已增加至 {db_resource.download_count}"
-        )
+        """将下载计数事件交给资源仓储处理。"""
+        # 保留事件服务接口，由仓储执行单表原子更新。
+        if not await self.resource_repo.increment_download_count(session, resource_id=resource_id):
+            logger.warning("下载计数资源已不存在：%s", resource_id)
 
     async def fetch_fresh_url(self, resource: ResourceDTO) -> str:
         """根据源消息动态获取当前有效的 Discord 附件 URL。"""
@@ -201,41 +123,4 @@ class DownloadService(BaseService):
             resource,
             user_id=user_id,
             source_loader=lambda: self.fetch_source_bytes(resource),
-        )
-
-    @staticmethod
-    def build_download_embed(resource: ResourceDTO, fresh_url: str) -> discord.Embed:
-        """构建同时适合直接下载和复制到 SillyTavern 的结果页。"""
-        embed = discord.Embed(
-            title="📥 角色卡下载",
-            description=(
-                f"**版本：** {resource.version_info}\n"
-                f"**文件：** `{resource.filename or '未命名文件'}`\n\n"
-                "📋 **SillyTavern 快速导入 URL**\n"
-                f"```\n{fresh_url}\n```\n"
-                f"[🌐 打开下载链接]({fresh_url})\n\n"
-                "链接具有时效性；失效后请重新打开下载面板获取。"
-            ),
-            color=discord.Color.green(),
-        )
-        filename = (resource.filename or "").lower()
-        if filename.endswith((".png", ".jpg", ".jpeg", ".webp", ".gif")):
-            embed.set_image(url=fresh_url)
-        return embed
-
-    @staticmethod
-    def build_delivery_embed(
-        resource: ResourceDTO, delivery: DeliveryResult
-    ) -> discord.Embed:
-        if delivery.url:
-            return DownloadService.build_download_embed(resource, delivery.url)
-        return discord.Embed(
-            title="📥 个性化角色卡下载",
-            description=(
-                f"**版本：** {resource.version_info}\n"
-                f"**文件：** `{delivery.filename}`\n\n"
-                "R2 当前不可用，已改用本条私密消息的附件交付。\n"
-                "该附件仅包含为当前用户生成的溯源凭证。"
-            ),
-            color=discord.Color.orange(),
         )

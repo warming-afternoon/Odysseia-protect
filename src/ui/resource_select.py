@@ -10,47 +10,46 @@ from typing import Sequence
 import discord
 
 from src.database.database import AsyncSessionLocal
-from src.models import Resource
+from src.dto.download_resource_option_dto import DownloadResourceOptionDTO
 from src.enums import UploadMode
-from src.database.repositories.resource import ResourceRepository
-from src.ui.password_input_modal import DownloadResponseMode, PasswordModal
-from src.dto.resource_dto import ResourceDTO
-from src.ui.trace_consent_ui import send_trace_consent
+from src.qo.resource_selection_qo import ResourceSelectionQo
+from src.ui.download_embed_builder import DownloadEmbedBuilder
+from src.enums.download_response_mode import DownloadResponseMode
+from src.ui.password_modal import PasswordModal
+from src.ui.trace_consent_view import send_trace_consent
 
 logger = logging.getLogger(__name__)
 
 class ResourceSelect(discord.ui.Select):
-    """
-    资源选择下拉菜单。
-    """
+    """当前资源页的版本选择下拉菜单。"""
 
     def __init__(
         self,
-        resources: Sequence[Resource],
+        resources: Sequence[DownloadResourceOptionDTO],
         *,
+        public_thread_id: int,
         resource_list_embed: discord.Embed | None = None,
         response_mode: DownloadResponseMode = DownloadResponseMode.EDIT_PRIVATE_PANEL,
-        private_view_factory: Callable[[], discord.ui.View] | None = None,
+        private_view_factory: Callable[..., discord.ui.View] | None = None,
     ):
+        """根据服务提供的当前页数据构建资源选项。"""
+        self.public_thread_id = public_thread_id
         self.resource_list_embed = resource_list_embed
         self.response_mode = response_mode
         self.private_view_factory = private_view_factory
         options = []
-        # Discord 的下拉菜单最多 25 项；按上传时间倒序，同一时间按 ID 倒序。
-        recent_resources = sorted(
-            resources, key=lambda resource: (resource.created_at, resource.id), reverse=True
-        )[:25]
-        for resource in recent_resources:
+        # 服务已完成数据库分页，菜单仅展示本页资源。
+        for resource in resources:
             if getattr(resource, "trace_enabled", False):
                 mode_icon = "🔎"
             else:
                 mode_icon = "🔒" if resource.upload_mode == UploadMode.SECURE else "📄"
-            
+
             # 构建 label 和 description，确保不超过 Discord 的 100 字符限制
             label_text = f"{mode_icon} 版本: {resource.version_info or '未命名'}"
             if len(label_text) > 100:
                 label_text = label_text[:90] + "..."
-            
+
             upload_date = resource.created_at.strftime("%Y/%m/%d")
             desc_prefix = f"{upload_date} · 文件名: "
             filename = resource.filename or "N/A"
@@ -58,7 +57,7 @@ class ResourceSelect(discord.ui.Select):
             if len(filename) > max_filename_length:
                 filename = filename[: max_filename_length - 3] + "..."
             desc_text = desc_prefix + filename
-            
+
             # 为每个资源创建一个选项
             option = discord.SelectOption(
                 label=label_text,
@@ -77,6 +76,7 @@ class ResourceSelect(discord.ui.Select):
 
         super().__init__(
             placeholder="请选择一个资源版本进行下载...",
+            row=0,
             min_values=1,
             max_values=1,
             options=options,
@@ -84,47 +84,52 @@ class ResourceSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction):
-        """
-        当用户在下拉菜单中做出选择时，此回调被触发。
-        它会根据资源是否加密来决定下一步操作：
-        - 如果有密码，则弹出密码输入模态框。
-        - 如果没有密码，则延迟响应，获取链接，然后发送结果。
-        """
-        selected_resource_id = int(self.values[0])
-        if self.view is not None and hasattr(
-            self.view, "clear_authorized_selection"
-        ):
-            self.view.clear_authorized_selection()
-
-        async with AsyncSessionLocal() as session:
-            resource_repo = ResourceRepository()
-            # 预加载关联的 Thread 对象
-            selected_resource = await resource_repo.get_with_thread(
-                session, id=selected_resource_id
-            )
-
-        if not selected_resource:
+        """串行处理版本选择，防止与同一面板的翻页冲突。"""
+        if self.view is None:
             await interaction.response.send_message(
-                "错误：找不到所选的资源，它可能已被删除。", ephemeral=True
+                "❌ 下载面板状态已失效，请重新使用 `/下载` 或右键“打开下载面板”。",
+                ephemeral=True,
             )
             return
+        if self.view.state_lock.locked():
+            await interaction.response.send_message("ℹ️ 面板正在更新，请稍后重试。", ephemeral=True)
+            return
+        async with self.view.state_lock:
+            await self._handle_selection(interaction)
 
-        # 将 ORM 对象转换为 DTO，避免 DetachedInstanceError
-        resource_dto = ResourceDTO(
-            id=selected_resource.id,
-            filename=selected_resource.filename,
-            version_info=selected_resource.version_info,
-            password=selected_resource.password,
-            source_message_id=selected_resource.source_message_id,
-            warehouse_thread_id=selected_resource.thread.warehouse_thread_id,
-            public_thread_id=selected_resource.thread.public_thread_id,
-            author_id=selected_resource.thread.author_id,
-            guild_id=selected_resource.thread.guild_id,
-            public_thread_name=selected_resource.thread.public_thread_name,
-            source_status=selected_resource.thread.source_status,
-            upload_mode=selected_resource.upload_mode,
-            trace_enabled=getattr(selected_resource, "trace_enabled", False),
-        )
+    async def _handle_selection(self, interaction: discord.Interaction):
+        """通过服务重新取得资源详情并进入对应下载流程。"""
+        # 拒绝已经翻页的旧菜单，避免恢复过期资源列表。
+        if self not in self.view.children or self.view.is_finished():
+            await interaction.response.send_message(
+                "❌ 下载面板状态已失效，请重新使用 `/下载` 或右键“打开下载面板”。",
+                ephemeral=True,
+            )
+            return
+        selected_resource_id = int(self.values[0])
+        if selected_resource_id not in {int(option.value) for option in self.options if option.value != "disabled"}:
+            await interaction.response.send_message("❌ 所选资源不在当前页。", ephemeral=True)
+            return
+        download_service = interaction.client.download_service
+        # ORM 详情在服务内部转换，回调仅接收独立的数据对象。
+        try:
+            async with AsyncSessionLocal() as session:
+                resource_dto = await download_service.get_selected_resource(
+                    session, ResourceSelectionQo(
+                        public_thread_id=self.public_thread_id, resource_id=selected_resource_id,
+                    ),
+                )
+        except Exception:
+            logger.exception("读取下载资源失败")
+            await interaction.response.send_message("❌ 读取资源失败，请稍后重试。", ephemeral=True)
+            return
+        if resource_dto is None:
+            await interaction.response.send_message(
+                "错误：找不到所选的资源，它可能已被删除。", ephemeral=True,
+            )
+            return
+        if hasattr(self.view, "clear_authorized_selection"):
+            self.view.clear_authorized_selection()
 
         resource_list_embed = self.resource_list_embed
         if (
@@ -149,7 +154,7 @@ class ResourceSelect(discord.ui.Select):
                     ephemeral=True,
                 )
                 return
-            panel_view = self.private_view_factory()
+            panel_view = self.private_view_factory(user_id=interaction.user.id)
 
         # 如果资源有密码，立即弹出模态框
         if resource_dto.password:
@@ -186,7 +191,7 @@ class ResourceSelect(discord.ui.Select):
             # 触发下载事件，供其他组件监听（如下载计数器）
             interaction.client.dispatch("resource_downloaded", resource_dto)
 
-            response_embed = download_service.build_download_embed(
+            response_embed = DownloadEmbedBuilder.build_download_embed(
                 resource_dto, fresh_url
             )
             if hasattr(panel_view, "authorize_selection"):
@@ -197,6 +202,7 @@ class ResourceSelect(discord.ui.Select):
             await interaction.edit_original_response(
                 embeds=[response_embed, resource_list_embed],
                 view=panel_view,
+                attachments=[],
             )
 
         except Exception as e:

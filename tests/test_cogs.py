@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 
 from src.cogs.antispam_cog import AntiSpamCog
 from src.cogs.upload_cog import UploadCog
-from src.services.download_service import DownloadPanelMode
+from src.enums.download_panel_mode import DownloadPanelMode
 
 
 def make_session_context() -> MagicMock:
@@ -22,7 +22,7 @@ async def test_antispam_keywords_send_short_lived_public_gateway(keyword: str):
         "embed": discord.Embed(title="📄 版本选择"),
         "view": discord.ui.View(),
     }
-    bot.download_service.handle_download_request = AsyncMock(
+    panel_builder = AsyncMock(
         return_value=response_data
     )
     cog = AntiSpamCog(bot)
@@ -33,14 +33,14 @@ async def test_antispam_keywords_send_short_lived_public_gateway(keyword: str):
     message.author.bot = False
     message.content = keyword
 
-    with patch(
+    with patch("src.cogs.antispam_cog.build_download_panel", panel_builder), patch(
         "src.cogs.antispam_cog.AsyncSessionLocal",
         return_value=make_session_context(),
     ):
         await cog.on_message(message)
 
-    bot.download_service.handle_download_request.assert_awaited_once()
-    request_kwargs = bot.download_service.handle_download_request.await_args.kwargs
+    panel_builder.assert_awaited_once()
+    request_kwargs = panel_builder.await_args.kwargs
     assert request_kwargs["source"] is message
     assert request_kwargs["panel_mode"] is DownloadPanelMode.PUBLIC_GATEWAY
     channel.send.assert_awaited_once_with(**response_data, delete_after=60)
@@ -49,7 +49,7 @@ async def test_antispam_keywords_send_short_lived_public_gateway(keyword: str):
 @pytest.mark.asyncio
 async def test_antispam_ignores_non_exact_keyword_and_empty_resource_result():
     bot = MagicMock()
-    bot.download_service.handle_download_request = AsyncMock()
+    panel_builder = AsyncMock()
     cog = AntiSpamCog(bot)
     channel = MagicMock(spec=discord.Thread)
     channel.send = AsyncMock()
@@ -60,14 +60,14 @@ async def test_antispam_ignores_non_exact_keyword_and_empty_resource_result():
 
     await cog.on_message(message)
 
-    bot.download_service.handle_download_request.assert_not_awaited()
+    panel_builder.assert_not_awaited()
     channel.send.assert_not_awaited()
 
     message.content = "下载"
-    bot.download_service.handle_download_request.return_value = {
+    panel_builder.return_value = {
         "embed": discord.Embed(title="📂 暂无资源")
     }
-    with patch(
+    with patch("src.cogs.antispam_cog.build_download_panel", panel_builder), patch(
         "src.cogs.antispam_cog.AsyncSessionLocal",
         return_value=make_session_context(),
     ):

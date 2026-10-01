@@ -1,5 +1,5 @@
 from typing import Sequence
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from sqlalchemy.orm import joinedload
@@ -16,6 +16,38 @@ class ResourceRepository(BaseRepository[Resource, ResourceCreate, ResourceUpdate
 
     def __init__(self):
         super().__init__(model=Resource)
+
+    async def count_by_thread_id(self, session: AsyncSession, *, thread_id: int) -> int:
+        """统计指定帖子中的资源版本总数。"""
+        # 仅统计资源表，避免加载完整资源列表。
+        statement = select(func.count()).select_from(self.model).where(
+            self.model.thread_id == thread_id
+        )
+        return int(await session.scalar(statement) or 0)
+
+    async def get_page_by_thread_id(
+        self, session: AsyncSession, *, thread_id: int, offset: int, limit: int
+    ) -> Sequence[Resource]:
+        """按上传时间及主键倒序读取指定帖子的资源页。"""
+        # 在数据库中排序和分页，同一上传时间由主键保证稳定顺序。
+        statement = (
+            select(self.model)
+            .where(self.model.thread_id == thread_id)
+            .order_by(self.model.created_at.desc(), self.model.id.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        return (await session.execute(statement)).scalars().all()
+
+    async def increment_download_count(self, session: AsyncSession, *, resource_id: int) -> bool:
+        """原子增加一个资源的下载次数并返回是否存在。"""
+        # 使用数据库表达式更新，避免并发下载丢失计数。
+        result = await session.execute(
+            update(self.model)
+            .where(self.model.id == resource_id)
+            .values(download_count=self.model.download_count + 1)
+        )
+        return bool(result.rowcount)
 
     async def get_by_thread_id(
         self, session: AsyncSession, thread_id: int

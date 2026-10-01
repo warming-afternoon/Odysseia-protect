@@ -1,19 +1,14 @@
+import asyncio
 import logging
-from enum import Enum
+from src.enums.download_response_mode import DownloadResponseMode
+from src.ui.download_embed_builder import DownloadEmbedBuilder
 
 import discord
 
 from src.dto.resource_dto import ResourceDTO
-from src.ui.trace_consent_ui import send_trace_consent
+from src.ui.trace_consent_view import send_trace_consent
 
 logger = logging.getLogger(__name__)
-
-
-class DownloadResponseMode(Enum):
-    """下载选择后的响应目标。"""
-
-    EDIT_PRIVATE_PANEL = "edit_private_panel"
-    CREATE_PRIVATE_PANEL = "create_private_panel"
 
 
 class PasswordModal(discord.ui.Modal, title="请输入下载密码"):
@@ -27,10 +22,12 @@ class PasswordModal(discord.ui.Modal, title="请输入下载密码"):
         panel_view: discord.ui.View,
         response_mode: DownloadResponseMode = DownloadResponseMode.EDIT_PRIVATE_PANEL,
     ):
+        """记录待验证资源与面板页快照。"""
         super().__init__(timeout=300)  # 5分钟超时
         self.resource = resource
         self.resource_list_embed = resource_list_embed
         self.panel_view = panel_view
+        self.page_snapshot = getattr(panel_view, "page_data", None)
         self.response_mode = response_mode
 
         self.password_input = discord.ui.TextInput(
@@ -43,7 +40,21 @@ class PasswordModal(discord.ui.Modal, title="请输入下载密码"):
         self.add_item(self.password_input)
 
     async def on_submit(self, interaction: discord.Interaction):
-        """当用户提交密码后，验证密码并提供下载链接或错误信息。"""
+        """串行验证密码并防止恢复已经翻页的面板。"""
+        # 已在翻页的面板及时提示，避免等待时交互过期。
+        lock = getattr(self.panel_view, "state_lock", None)
+        if lock is not None and lock.locked():
+            await interaction.response.send_message("ℹ️ 面板正在更新，请稍后重试。", ephemeral=True)
+            return
+        async with lock or asyncio.Lock():
+            if self.page_snapshot is not getattr(self.panel_view, "page_data", None):
+                await interaction.response.send_message("❌ 页面已变化，请重新选择资源。", ephemeral=True)
+                return
+            await self._handle_submit(interaction)
+
+    async def _handle_submit(self, interaction: discord.Interaction):
+        """验证密码并提供下载链接或溯源确认。"""
+        # 密码验证失败时保留原页与菜单。
         if self.password_input.value != self.resource.password:
             embed = discord.Embed(
                 title="❌ 密码错误",
@@ -52,7 +63,6 @@ class PasswordModal(discord.ui.Modal, title="请输入下载密码"):
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
-
 
         if self.resource.trace_enabled:
             await send_trace_consent(
@@ -78,7 +88,7 @@ class PasswordModal(discord.ui.Modal, title="请输入下载密码"):
             # 触发下载事件，供下载计数器监听
             interaction.client.dispatch("resource_downloaded", self.resource)
 
-            embed = download_service.build_download_embed(self.resource, fresh_url)
+            embed = DownloadEmbedBuilder.build_download_embed(self.resource, fresh_url)
             if hasattr(self.panel_view, "authorize_selection"):
                 await self.panel_view.authorize_selection(
                     interaction,
@@ -87,6 +97,7 @@ class PasswordModal(discord.ui.Modal, title="请输入下载密码"):
             await interaction.edit_original_response(
                 embeds=[embed, self.resource_list_embed],
                 view=self.panel_view,
+                attachments=[],
             )
 
         except Exception as e:

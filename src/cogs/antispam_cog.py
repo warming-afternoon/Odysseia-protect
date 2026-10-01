@@ -5,25 +5,23 @@ from discord.ext import commands
 
 from src.config import ANTISPAM_KEYWORDS
 from src.database.database import AsyncSessionLocal
-from src.services.download_service import DownloadPanelMode
+from src.ui.download_panel import build_download_panel
+from src.enums.download_panel_mode import DownloadPanelMode
 
 if TYPE_CHECKING:
     from main import OdysseiaProtect
 
 
 class AntiSpamCog(commands.Cog):
-    """
-    用于防止滥用和引导用户的 Cog.
-    """
+    """检测下载关键词并提供短期公开入口。"""
 
     def __init__(self, bot: "OdysseiaProtect"):
+        """记录机器人依赖供下载入口使用。"""
         self.bot = bot
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        """
-        监听帖子中的消息，如果检测到特定关键词，则发送一个临时的下载面板。
-        """
+        """精确匹配关键词后发送限时公开下载面板。"""
         # 确保消息来自帖子，并且不是由机器人自己发出的
         if not isinstance(message.channel, discord.Thread) or message.author.bot:
             return
@@ -34,10 +32,10 @@ class AntiSpamCog(commands.Cog):
         ]:
             return
 
-        # 调用通用的 download_service 来处理请求
+        # 在短会话内取得当前页数据并构建公开入口。
         async with AsyncSessionLocal() as session:
-            response_data = await self.bot.download_service.handle_download_request(
-                session,
+            response_data = await build_download_panel(
+                self.bot.download_service, session,
                 source=message,
                 panel_mode=DownloadPanelMode.PUBLIC_GATEWAY,
             )
@@ -51,7 +49,5 @@ class AntiSpamCog(commands.Cog):
 
 
 async def setup(bot: "OdysseiaProtect"):
-    """
-    设置 AntiSpamCog.
-    """
+    """注册下载关键词监听组件。"""
     await bot.add_cog(AntiSpamCog(bot))
