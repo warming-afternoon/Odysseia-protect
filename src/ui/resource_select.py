@@ -36,8 +36,11 @@ class ResourceSelect(discord.ui.Select):
         self.response_mode = response_mode
         self.private_view_factory = private_view_factory
         options = []
-        # Discord 的下拉菜单最多只能有 25 个选项
-        for resource in resources[:25]:
+        # Discord 的下拉菜单最多 25 项；按上传时间倒序，同一时间按 ID 倒序。
+        recent_resources = sorted(
+            resources, key=lambda resource: (resource.created_at, resource.id), reverse=True
+        )[:25]
+        for resource in recent_resources:
             if getattr(resource, "trace_enabled", False):
                 mode_icon = "🔎"
             else:
