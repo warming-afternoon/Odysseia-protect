@@ -81,18 +81,51 @@ async def test_download_select_includes_dates_for_all_resource_modes():
     select = view.children[0]
 
     assert len(select.options) == 3
-    assert select.options[0].label.startswith("🔒")
+    assert select.options[0].label.startswith("🔎")
     assert select.options[1].label.startswith("📄")
-    assert select.options[2].label.startswith("🔎")
+    assert select.options[2].label.startswith("🔒")
     assert [option.description for option in select.options] == [
-        "2026/09/05 · 文件名: card-1.png",
-        "2026/09/05 · 文件名: card-2.png",
         "2026/09/05 · 文件名: card-3.png",
+        "2026/09/05 · 文件名: card-2.png",
+        "2026/09/05 · 文件名: card-1.png",
     ]
     assert view.children[1].label == "加入心愿单"
     assert view.children[1].disabled is True
     assert view.children[2].label == "从心愿单中移除"
     assert view.children[2].disabled is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("view_type", [ResourceSelectView, PublicResourceSelectView])
+async def test_download_select_keeps_latest_25_versions(view_type):
+    resources = [make_resource(i, version=f"v{i}") for i in range(1, 27)]
+    view = view_type(
+        resources,
+        resource_list_embed=discord.Embed(title="📄 版本选择"),
+    )
+
+    assert [option.value for option in view.children[0].options] == [
+        str(i) for i in range(26, 1, -1)
+    ]
+    if view_type is PublicResourceSelectView:
+        private_view = view.children[0].private_view_factory()
+        assert [option.value for option in private_view.children[0].options] == [
+            str(i) for i in range(26, 1, -1)
+        ]
+    assert [resource.id for resource in resources] == list(range(1, 27))
+
+
+@pytest.mark.asyncio
+async def test_download_select_orders_by_upload_time_before_id():
+    oldest = make_resource(30, version="oldest")
+    oldest.created_at = datetime(2026, 9, 1)
+    latest = make_resource(1, version="latest")
+    latest.created_at = datetime(2026, 9, 10)
+    middle = make_resource(20, version="middle")
+
+    view = ResourceSelectView([middle, oldest, latest])
+
+    assert [option.value for option in view.children[0].options] == ["1", "20", "30"]
 
 
 def test_download_select_truncates_long_filename_after_date():
