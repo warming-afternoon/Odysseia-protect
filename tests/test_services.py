@@ -1,3 +1,4 @@
+from src.ui.download_panel import build_download_panel
 import pytest
 import discord
 from unittest.mock import AsyncMock, MagicMock
@@ -5,14 +6,16 @@ from unittest.mock import AsyncMock, MagicMock
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.services.upload_service import UploadService
-from src.services.download_service import DownloadPanelMode, DownloadService
+from src.enums.download_panel_mode import DownloadPanelMode
+from src.services.download_service import DownloadService
 from src.services.management_service import ManagementService
 from src.database.repositories.resource import ResourceRepository
 from src.database.repositories.thread import ThreadRepository
 from src.database.repositories.user import UserRepository
 from src.database.schemas import ResourceCreate, ThreadCreate, UserCreate
 from src.enums import UploadMode
-from src.ui.resource_select_view import PublicResourceSelectView, ResourceSelectView
+from src.ui.public_resource_select_view import PublicResourceSelectView
+from src.ui.resource_select_view import ResourceSelectView
 
 
 def management_interaction(thread):
@@ -139,8 +142,8 @@ class TestDownloadService:
         mock_interaction.channel = MagicMock(spec=discord.Thread)
         mock_interaction.channel.id = 12345
 
-        result = await service.handle_download_request(
-            session=db_session,
+        result = await build_download_panel(
+            service, session=db_session,
             source=mock_interaction,
         )
 
@@ -187,8 +190,8 @@ class TestDownloadService:
         mock_interaction.channel = MagicMock(spec=discord.Thread)
         mock_interaction.channel.id = 555
 
-        result = await service.handle_download_request(
-            session=db_session,
+        result = await build_download_panel(
+            service, session=db_session,
             source=mock_interaction,
         )
 
@@ -198,8 +201,8 @@ class TestDownloadService:
         assert result["embed"].title == "📄 版本选择"
         assert isinstance(result["view"], ResourceSelectView)
 
-        public_result = await service.handle_download_request(
-            session=db_session,
+        public_result = await build_download_panel(
+            service, session=db_session,
             source=mock_interaction,
             panel_mode=DownloadPanelMode.PUBLIC_GATEWAY,
         )

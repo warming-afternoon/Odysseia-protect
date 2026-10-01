@@ -1,3 +1,4 @@
+import asyncio
 import io
 import logging
 from dataclasses import dataclass
@@ -6,6 +7,7 @@ from typing import TYPE_CHECKING
 import discord
 
 from src.config import WISHLIST_POLICY_TEXT
+from src.enums.wishlist import WISHLIST_ADDED_MESSAGE
 from src.database.database import AsyncSessionLocal
 from src.enums import SourceStatus
 
@@ -493,25 +495,22 @@ class WishlistConsentView(discord.ui.View):
             )
             return
 
-        selection_is_still_current = (
-            getattr(self.panel_view, "selected_resource_id", None)
-            == self.resource_id
-        )
-        if selection_is_still_current:
-            self.panel_view.set_wishlist_state(True)
-        if selection_is_still_current and self.panel_message is not None:
-            try:
-                await self.panel_message.edit(view=self.panel_view)
-            except discord.HTTPException:
-                logger.warning("无法刷新原下载面板的心愿单按钮状态")
+        # 与下载面板翻页串行刷新，避免覆盖其他页的收藏状态。
+        async with getattr(self.panel_view, "state_lock", asyncio.Lock()):
+            selection_is_still_current = (
+                getattr(self.panel_view, "selected_resource_id", None)
+                == self.resource_id
+            )
+            if selection_is_still_current:
+                self.panel_view.set_wishlist_state(True)
+            if selection_is_still_current and self.panel_message is not None:
+                try:
+                    await self.panel_message.edit(view=self.panel_view)
+                except discord.HTTPException:
+                    logger.warning("无法刷新原下载面板的心愿单按钮状态")
 
         await interaction.edit_original_response(
-            content=(
-                "✅ 已加入心愿单！\n"
-                "使用 `/心愿单`，或右键任意服务器消息 → Apps → “打开心愿单”查看。\n"
-                "每页最多 6 项，页末 URL 可一键复制并粘贴到 "
-                "SillyTavern 批量导入；链接失效后重新打开即可刷新。"
-            ),
+            content=WISHLIST_ADDED_MESSAGE,
             embed=None,
             view=None,
         )

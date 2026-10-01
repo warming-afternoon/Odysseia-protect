@@ -10,14 +10,13 @@ from discord.ext import commands
 from typing import TYPE_CHECKING
 
 from src.database.database import AsyncSessionLocal
+from src.ui.download_panel import build_download_panel
 
 if TYPE_CHECKING:
     from main import OdysseiaProtect
 
 class DownloadCog(commands.Cog):
-    """
-    这个 Cog 包含了 `/下载` 命令，用于让用户浏览和下载当前帖子的资源。
-    """
+    """处理帖子资源下载命令及入口交互。"""
 
     def __init__(self, bot: "OdysseiaProtect"):
         """Cog 的构造函数。"""
@@ -25,22 +24,17 @@ class DownloadCog(commands.Cog):
 
     @app_commands.command(name="下载", description="获取本帖资源的下载列表。")
     async def download(self, interaction: discord.Interaction):
-        """
-        处理 /下载 命令的核心函数。
-
-        它将调用 Service 层来获取资源列表并构建一个交互式的选择菜单。
-        """
+        """查询资源第一页并发送私密下载面板。"""
         # 延迟响应，因为获取数据和构建视图可能需要时间
         await interaction.response.defer(ephemeral=True)
 
-        # 调用 Service 层来处理下载请求
+        # 在短会话内取得分页数据并构建下载面板。
         async with AsyncSessionLocal() as session:
-            response_data = await self.bot.download_service.handle_download_request(
-                session, source=interaction
+            response_data = await build_download_panel(
+                self.bot.download_service, session, source=interaction
             )
 
-        # 使用关键字参数解包来发送响应
-        # 如果 "view" 不在字典中，它就不会被作为参数传递
+        # 数据库会话关闭后发送由 DTO 构建的响应。
         await interaction.followup.send(**response_data, ephemeral=True)
 
 async def setup(bot: "OdysseiaProtect"):
@@ -62,8 +56,8 @@ async def setup(bot: "OdysseiaProtect"):
 
         await interaction.response.defer(ephemeral=True)
         async with AsyncSessionLocal() as session:
-            response_data = await bot.download_service.handle_download_request(
-                session, source=interaction
+            response_data = await build_download_panel(
+                bot.download_service, session, source=interaction
             )
         await interaction.followup.send(**response_data, ephemeral=True)
 

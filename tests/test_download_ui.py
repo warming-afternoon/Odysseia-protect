@@ -8,9 +8,39 @@ import pytest
 from src.enums import UploadMode
 from src.enums import SourceStatus
 from src.dto.resource_dto import ResourceDTO
-from src.services.download_service import DownloadService
-from src.ui.password_input_modal import DownloadResponseMode, PasswordModal
-from src.ui.resource_select_view import PublicResourceSelectView, ResourceSelectView
+from src.ui.download_embed_builder import DownloadEmbedBuilder
+from src.dto.download_page_dto import DownloadPageDTO
+from src.dto.download_resource_option_dto import DownloadResourceOptionDTO
+from src.enums.download_response_mode import DownloadResponseMode
+from src.ui.password_modal import PasswordModal
+from src.ui.public_resource_select_view import PublicResourceSelectView
+from src.ui.resource_select_view import ResourceSelectView
+
+
+def make_page(resources, *, total=None, page=1):
+    ordered = resources
+    count = len(ordered) if total is None else total
+    return DownloadPageDTO(
+        public_thread_id=300, guild_id=400, total=count, page=page,
+        max_page=max(1, (count + 24) // 25),
+        items=tuple(DownloadResourceOptionDTO.model_validate(r) for r in ordered),
+    )
+
+
+def make_private_view(resources, *, resource_list_embed=None):
+    view = ResourceSelectView(make_page(resources))
+    if resource_list_embed is not None:
+        view.resource_list_embed = resource_list_embed
+        view.children[0].resource_list_embed = resource_list_embed
+    return view
+
+
+def make_public_view(resources, *, resource_list_embed=None):
+    view = PublicResourceSelectView(make_page(resources))
+    if resource_list_embed is not None:
+        view.resource_list_embed = resource_list_embed
+        view.children[0].resource_list_embed = resource_list_embed
+    return view
 
 
 def test_download_embed_exposes_copyable_url_and_png_preview():
@@ -23,7 +53,7 @@ def test_download_embed_exposes_copyable_url_and_png_preview():
     )
     url = "https://cdn.discordapp.com/attachments/example/card.png"
 
-    embed = DownloadService.build_download_embed(resource, url)
+    embed = DownloadEmbedBuilder.build_download_embed(resource, url)
 
     assert url in (embed.description or "")
     assert f"```\n{url}\n```" in (embed.description or "")
@@ -39,7 +69,7 @@ def test_download_embed_skips_preview_for_non_image():
         public_thread_id=3,
     )
 
-    embed = DownloadService.build_download_embed(resource, "https://example.com/cards.zip")
+    embed = DownloadEmbedBuilder.build_download_embed(resource, "https://example.com/cards.zip")
 
     assert embed.image.url is None
 
@@ -55,6 +85,7 @@ def make_resource(
         filename=f"card-{resource_id}.png",
         version_info=version,
         password=password,
+        trace_enabled=False,
         source_message_id=resource_id + 100,
         upload_mode=UploadMode.SECURE,
         created_at=datetime(2026, 9, 5, 12, 34, 56),
@@ -77,7 +108,7 @@ async def test_download_select_includes_dates_for_all_resource_modes():
     normal.upload_mode = UploadMode.NORMAL
     trace.trace_enabled = True
 
-    view = ResourceSelectView([secure, normal, trace])
+    view = make_private_view([trace, normal, secure])
     select = view.children[0]
 
     assert len(select.options) == 3
@@ -95,44 +126,11 @@ async def test_download_select_includes_dates_for_all_resource_modes():
     assert view.children[2].disabled is True
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("view_type", [ResourceSelectView, PublicResourceSelectView])
-async def test_download_select_keeps_latest_25_versions(view_type):
-    resources = [make_resource(i, version=f"v{i}") for i in range(1, 27)]
-    view = view_type(
-        resources,
-        resource_list_embed=discord.Embed(title="📄 版本选择"),
-    )
-
-    assert [option.value for option in view.children[0].options] == [
-        str(i) for i in range(26, 1, -1)
-    ]
-    if view_type is PublicResourceSelectView:
-        private_view = view.children[0].private_view_factory()
-        assert [option.value for option in private_view.children[0].options] == [
-            str(i) for i in range(26, 1, -1)
-        ]
-    assert [resource.id for resource in resources] == list(range(1, 27))
-
-
-@pytest.mark.asyncio
-async def test_download_select_orders_by_upload_time_before_id():
-    oldest = make_resource(30, version="oldest")
-    oldest.created_at = datetime(2026, 9, 1)
-    latest = make_resource(1, version="latest")
-    latest.created_at = datetime(2026, 9, 10)
-    middle = make_resource(20, version="middle")
-
-    view = ResourceSelectView([middle, oldest, latest])
-
-    assert [option.value for option in view.children[0].options] == ["1", "20", "30"]
-
-
 def test_download_select_truncates_long_filename_after_date():
     resource = make_resource(1, version="v1")
     resource.filename = "a" * 150 + ".png"
 
-    view = ResourceSelectView([resource])
+    view = make_private_view([resource])
     description = view.children[0].options[0].description
 
     assert description is not None
@@ -145,7 +143,7 @@ def test_download_select_uses_na_for_missing_filename():
     resource = make_resource(1, version="v1")
     resource.filename = None
 
-    view = ResourceSelectView([resource])
+    view = make_private_view([resource])
 
     assert view.children[0].options[0].description == (
         "2026/09/05 · 文件名: N/A"
@@ -155,7 +153,7 @@ def test_download_select_uses_na_for_missing_filename():
 @pytest.mark.asyncio
 async def test_public_download_gateway_only_contains_a_short_lived_select():
     resource = make_resource(1, version="v1")
-    view = PublicResourceSelectView(
+    view = make_public_view(
         [resource],
         resource_list_embed=discord.Embed(title="📄 版本选择"),
     )
@@ -200,7 +198,7 @@ async def test_resource_select_replaces_result_embed_in_private_panel():
     first_download_embed = discord.Embed(title="📥 v1")
     second_download_embed = discord.Embed(title="📥 v2")
 
-    view = ResourceSelectView(
+    view = make_private_view(
         [first_resource, second_resource],
         resource_list_embed=resource_list_embed,
     )
@@ -210,13 +208,12 @@ async def test_resource_select_replaces_result_embed_in_private_panel():
     download_service.fetch_fresh_url = AsyncMock(
         side_effect=["https://example.com/v1.png", "https://example.com/v2.png"]
     )
-    download_service.build_download_embed = MagicMock(
+    embed_builder = MagicMock(
         side_effect=[first_download_embed, second_download_embed]
     )
     interaction = make_interaction(download_service)
 
-    repository = MagicMock()
-    repository.get_with_thread = AsyncMock(
+    interaction.client.download_service.get_selected_resource = AsyncMock(
         side_effect=[first_resource, second_resource]
     )
     session_context = make_session_context()
@@ -226,25 +223,25 @@ async def test_resource_select_replaces_result_embed_in_private_panel():
             "src.ui.resource_select.AsyncSessionLocal",
             return_value=session_context,
         ),
-        patch(
-            "src.ui.resource_select.ResourceRepository",
-            return_value=repository,
-        ),
     ):
         select._values = ["1"]
-        await select.callback(interaction)
+        with patch.object(DownloadEmbedBuilder, "build_download_embed", embed_builder):
+            await select.callback(interaction)
         select._values = ["2"]
-        await select.callback(interaction)
+        with patch.object(DownloadEmbedBuilder, "build_download_embed", embed_builder):
+            await select.callback(interaction)
 
     assert interaction.response.defer.await_args_list == [call(), call()]
     assert interaction.edit_original_response.await_args_list == [
         call(
             embeds=[first_download_embed, resource_list_embed],
             view=view,
+            attachments=[],
         ),
         call(
             embeds=[second_download_embed, resource_list_embed],
             view=view,
+            attachments=[],
         ),
     ]
     interaction.followup.send.assert_not_awaited()
@@ -256,7 +253,7 @@ async def test_public_download_gateway_creates_private_complete_panel():
     resource = make_resource(1, version="v1")
     resource_list_embed = discord.Embed(title="📄 版本选择")
     result_embed = discord.Embed(title="📥 角色卡下载")
-    public_view = PublicResourceSelectView(
+    public_view = make_public_view(
         [resource],
         resource_list_embed=resource_list_embed,
     )
@@ -267,25 +264,21 @@ async def test_public_download_gateway_creates_private_complete_panel():
     download_service.fetch_fresh_url = AsyncMock(
         return_value="https://example.com/card.png"
     )
-    download_service.build_download_embed = MagicMock(return_value=result_embed)
+    embed_builder = MagicMock(return_value=result_embed)
     interaction = make_interaction(download_service)
     public_message = SimpleNamespace(edit=AsyncMock())
     interaction.message = public_message
 
-    repository = MagicMock()
-    repository.get_with_thread = AsyncMock(return_value=resource)
+    interaction.client.download_service.get_selected_resource = AsyncMock(return_value=resource)
 
     with (
         patch(
             "src.ui.resource_select.AsyncSessionLocal",
             return_value=make_session_context(),
         ),
-        patch(
-            "src.ui.resource_select.ResourceRepository",
-            return_value=repository,
-        ),
     ):
-        await select.callback(interaction)
+        with patch.object(DownloadEmbedBuilder, "build_download_embed", embed_builder):
+            await select.callback(interaction)
 
     interaction.response.defer.assert_awaited_once_with(
         ephemeral=True,
@@ -301,6 +294,7 @@ async def test_public_download_gateway_creates_private_complete_panel():
     interaction.edit_original_response.assert_awaited_once_with(
         embeds=[result_embed, resource_list_embed],
         view=private_panel,
+        attachments=[],
     )
 
 
@@ -309,7 +303,7 @@ async def test_public_password_selection_creates_private_complete_panel():
     resource = make_resource(1, version="v1", password="secret")
     resource_list_embed = discord.Embed(title="📄 版本选择")
     result_embed = discord.Embed(title="📥 角色卡下载")
-    public_view = PublicResourceSelectView(
+    public_view = make_public_view(
         [resource],
         resource_list_embed=resource_list_embed,
     )
@@ -320,17 +314,12 @@ async def test_public_password_selection_creates_private_complete_panel():
     interaction = make_interaction(download_service)
     public_message = SimpleNamespace(edit=AsyncMock())
     interaction.message = public_message
-    repository = MagicMock()
-    repository.get_with_thread = AsyncMock(return_value=resource)
+    interaction.client.download_service.get_selected_resource = AsyncMock(return_value=resource)
 
     with (
         patch(
             "src.ui.resource_select.AsyncSessionLocal",
             return_value=make_session_context(),
-        ),
-        patch(
-            "src.ui.resource_select.ResourceRepository",
-            return_value=repository,
         ),
     ):
         await select.callback(interaction)
@@ -346,10 +335,11 @@ async def test_public_password_selection_creates_private_complete_panel():
     download_service.fetch_fresh_url = AsyncMock(
         return_value="https://example.com/card.png"
     )
-    download_service.build_download_embed = MagicMock(return_value=result_embed)
+    embed_builder = MagicMock(return_value=result_embed)
     modal_interaction = make_interaction(download_service)
 
-    await modal.on_submit(modal_interaction)
+    with patch.object(DownloadEmbedBuilder, "build_download_embed", embed_builder):
+        await modal.on_submit(modal_interaction)
 
     modal_interaction.response.defer.assert_awaited_once_with(
         ephemeral=True,
@@ -358,6 +348,7 @@ async def test_public_password_selection_creates_private_complete_panel():
     modal_interaction.edit_original_response.assert_awaited_once_with(
         embeds=[result_embed, resource_list_embed],
         view=modal.panel_view,
+        attachments=[],
     )
     assert modal.panel_view.selected_resource_id == resource.id
 
@@ -365,7 +356,7 @@ async def test_public_password_selection_creates_private_complete_panel():
 @pytest.mark.asyncio
 async def test_private_password_selection_only_opens_modal_without_editing_panel():
     resource = make_resource(1, version="v1", password="secret")
-    view = ResourceSelectView(
+    view = make_private_view(
         [resource],
         resource_list_embed=discord.Embed(title="📄 版本选择"),
     )
@@ -374,17 +365,12 @@ async def test_private_password_selection_only_opens_modal_without_editing_panel
     interaction = make_interaction(MagicMock())
     private_message = SimpleNamespace(edit=AsyncMock())
     interaction.message = private_message
-    repository = MagicMock()
-    repository.get_with_thread = AsyncMock(return_value=resource)
+    interaction.client.download_service.get_selected_resource = AsyncMock(return_value=resource)
 
     with (
         patch(
             "src.ui.resource_select.AsyncSessionLocal",
             return_value=make_session_context(),
-        ),
-        patch(
-            "src.ui.resource_select.ResourceRepository",
-            return_value=repository,
         ),
     ):
         await select.callback(interaction)
@@ -396,7 +382,7 @@ async def test_private_password_selection_only_opens_modal_without_editing_panel
 @pytest.mark.asyncio
 async def test_public_download_gateway_reports_link_failure_privately():
     resource = make_resource(1, version="v1")
-    public_view = PublicResourceSelectView(
+    public_view = make_public_view(
         [resource],
         resource_list_embed=discord.Embed(title="📄 版本选择"),
     )
@@ -410,17 +396,12 @@ async def test_public_download_gateway_reports_link_failure_privately():
     interaction = make_interaction(download_service)
     public_message = SimpleNamespace(edit=AsyncMock())
     interaction.message = public_message
-    repository = MagicMock()
-    repository.get_with_thread = AsyncMock(return_value=resource)
+    interaction.client.download_service.get_selected_resource = AsyncMock(return_value=resource)
 
     with (
         patch(
             "src.ui.resource_select.AsyncSessionLocal",
             return_value=make_session_context(),
-        ),
-        patch(
-            "src.ui.resource_select.ResourceRepository",
-            return_value=repository,
         ),
     ):
         await select.callback(interaction)
@@ -445,7 +426,7 @@ async def test_public_download_gateway_reports_link_failure_privately():
 async def test_resource_select_failure_keeps_panel_and_sends_private_error():
     resource = make_resource(1, version="v1")
     resource_list_embed = discord.Embed(title="📄 版本选择")
-    view = ResourceSelectView(
+    view = make_private_view(
         [resource],
         resource_list_embed=resource_list_embed,
     )
@@ -458,17 +439,12 @@ async def test_resource_select_failure_keeps_panel_and_sends_private_error():
     )
     interaction = make_interaction(download_service)
 
-    repository = MagicMock()
-    repository.get_with_thread = AsyncMock(return_value=resource)
+    interaction.client.download_service.get_selected_resource = AsyncMock(return_value=resource)
 
     with (
         patch(
             "src.ui.resource_select.AsyncSessionLocal",
             return_value=make_session_context(),
-        ),
-        patch(
-            "src.ui.resource_select.ResourceRepository",
-            return_value=repository,
         ),
     ):
         await select.callback(interaction)
@@ -482,22 +458,18 @@ async def test_resource_select_failure_keeps_panel_and_sends_private_error():
 @pytest.mark.asyncio
 async def test_expired_resource_select_points_to_available_download_entries():
     resource = make_resource(1, version="v1")
-    view = ResourceSelectView([resource])
+    view = make_private_view([resource])
     select = view.children[0]
     select._values = ["1"]
     interaction = make_interaction(MagicMock())
+    view.stop()
 
-    repository = MagicMock()
-    repository.get_with_thread = AsyncMock(return_value=resource)
+    interaction.client.download_service.get_selected_resource = AsyncMock(return_value=resource)
 
     with (
         patch(
             "src.ui.resource_select.AsyncSessionLocal",
             return_value=make_session_context(),
-        ),
-        patch(
-            "src.ui.resource_select.ResourceRepository",
-            return_value=repository,
         ),
     ):
         await select.callback(interaction)
@@ -532,15 +504,17 @@ async def test_password_modal_updates_original_private_panel():
     download_service.fetch_fresh_url = AsyncMock(
         return_value="https://example.com/card.png"
     )
-    download_service.build_download_embed = MagicMock(return_value=result_embed)
+    embed_builder = MagicMock(return_value=result_embed)
     interaction = make_interaction(download_service)
 
-    await modal.on_submit(interaction)
+    with patch.object(DownloadEmbedBuilder, "build_download_embed", embed_builder):
+        await modal.on_submit(interaction)
 
     interaction.response.defer.assert_awaited_once_with()
     interaction.edit_original_response.assert_awaited_once_with(
         embeds=[result_embed, resource_list_embed],
         view=panel_view,
+        attachments=[],
     )
     interaction.followup.send.assert_not_awaited()
     interaction.client.dispatch.assert_called_once_with(
