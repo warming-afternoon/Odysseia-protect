@@ -1,6 +1,6 @@
 # Odysseia Protect
 
-一个用于 Discord 的文件管理和保护机器人，支持两种上传模式：**普通资源**和**受保护资源**，并提供完整的资源管理、下载、反应墙等功能。
+一个用于 Discord 的文件管理和保护机器人，支持两种上传模式：**普通资源**和**受保护资源**，并提供完整的资源管理、下载、溯源等功能。
 
 ## 功能特性
 
@@ -9,20 +9,15 @@
   - **受保护文件**：将文件上传至私密仓库频道，提供有时效性的下载链接，支持密码保护。
 
 - **协作者授权**
-  - 原作者可给小号或其他维护者授权，管理组可为失联账号安排协作者。
+  - 原作者可给小号或其他维护者授权，管理组可为被封账号安排协作者。
   - 授权按原作者账号跨服生效，覆盖现有和未来帖子；支持多对多。
   - 任何人可查看协作者名单，增删仅限原作者和管理组。
 
-- **完整的资源管理**
+- **资源管理**
   - `/上传` – 上传新资源（普通/受保护）。
   - `/下载` – 获取当前帖子的资源列表并下载。
   - `/管理` – 管理已上传的资源（编辑、删除、开启/关闭反应墙）。
   - `/使用手册` – 显示详细的使用手册。
-
-- **反应墙（Reaction Wall）**
-  - 可要求用户在下载受保护资源前对帖子起始消息做出反应。
-  - 支持自定义反应表情，或允许任意表情。
-  - 仅对受保护资源生效。
 
 - **隐私协议**
   - 首次使用 Bot 时需同意隐私协议，确保用户了解数据存储与使用规则。
@@ -31,53 +26,13 @@
   - 作者可为 PNG 角色卡开启溯源水印。
   - 管理员可通过 `/溯源 核验` 批量核验 PNG、ZIP 和 7z。
 
-- **数据一致性**
-  - 删除受保护资源时，会同时删除仓库频道中的文件副本，确保数据同步。
-
-## 技术架构
-
-项目采用分层架构，职责清晰，易于维护和扩展：
-
-```
-src/
-├── cogs/                    # Discord 命令层（表现层）
-│   ├── upload_cog.py       # /上传 命令
-│   ├── download_cog.py     # /下载 命令
-│   ├── manage_cog.py       # /管理 命令
-│   └── info_cog.py         # /使用手册 命令
-├── services/               # 业务逻辑层
-│   ├── upload_service.py   # 上传业务逻辑
-│   ├── download_service.py # 下载业务逻辑
-│   ├── management_service.py # 管理业务逻辑
-│   └── reaction_wall_service.py # 反应墙逻辑
-├── database/               # 数据访问层
-│   ├── repositories/      # 仓库模式封装数据库操作
-│   └── schemas.py         # Pydantic 数据验证模型
-├── models/                 # SQLAlchemy ORM 模型，一类一文件
-│   ├── base.py             # 共用声明式基类
-│   ├── thread.py           # Thread
-│   ├── resource.py         # Resource
-│   ├── user.py             # User
-│   ├── wishlist_item.py    # WishlistItem
-│   ├── author_collaborator.py # AuthorCollaborator
-│   └── trace_verification_job.py # TraceVerificationJob
-├── enums/                  # 枚举（SourceStatus、UploadMode）
-├── ui/                     # UI 组件层
-│   ├── upload_ui.py       # 上传相关的 Modal 和 View
-│   ├── download_ui.py     # 下载相关的 View
-│   └── management_ui.py   # 管理相关的 View
-└── utils/                  # 工具层
-    ├── discord_utils.py   # Discord 相关工具函数
-    └── formatting.py      # 格式化工具
-```
 
 ## 快速开始
 
 ### 环境要求
 
 - Python 3.8+
-- Discord Bot Token
-- SQLite（默认）或 PostgreSQL
+- SQLite
 
 ### 安装步骤
 
@@ -87,12 +42,7 @@ src/
    cd Odysseia-protect
    ```
 
-2. **安装依赖**
-   ```bash
-   uv sync
-   ```
-
-3. **配置环境变量**
+2. **配置环境变量**
    复制 `.env.example` 为 `.env` 并填写：
    ```env
    DISCORD_BOT_TOKEN=your_bot_token_here
@@ -102,8 +52,17 @@ src/
    动态溯源还需要 Redis、私有 R2、AES 密钥及管理员 ID；完整配置见
    [`docs/dynamic_traceability.md`](docs/dynamic_traceability.md)
 
-4. **运行 Bot**
+3. **运行 Bot**
+
 - windows 部署
+
+  **windows 安装依赖**
+
+   ```bash
+   uv sync
+   ```
+
+  **windows 启动项目**
 
    ```bash
    python main.py
@@ -115,7 +74,8 @@ src/
    docker compose up --build -d
    ```
 
-5. 关闭 Bot 
+4. 关闭 Bot 
+
 - windows 部署
 
    ```bash
@@ -135,8 +95,8 @@ src/
 上传一个新资源。
 
 - **子命令**：
-  - `/上传 普通文件 message_link`：引用帖子内已有的资源消息。
-  - `/上传 受保护文件 file`：直接上传需要保护的附件。
+  - `/上传普通文件`：引用帖子内已有的资源消息。
+  - `/上传受保护文件`：直接上传需要保护的附件。
 
 - **流程**：
   1. 检查隐私协议（首次使用）。
@@ -151,9 +111,8 @@ src/
   1. 检查当前帖子是否有资源。
   2. 按模式分组显示（受保护资源/普通资源）。
   3. 对于受保护资源，提供下拉菜单选择下载。
-  4. 若启用反应墙，验证用户是否已对起始消息做出反应。
-  5. 若资源有密码，弹出密码验证模态框。
-  6. 验证通过后，动态生成有时效性的下载链接。
+  4. 若资源有密码，弹出密码验证模态框。
+  5. 验证通过后，动态生成有时效性的下载链接。
 
 ### `/管理`
 管理当前帖子的资源和设置。
@@ -161,13 +120,9 @@ src/
 - **功能**：
   - 查看资源列表（按模式分组）。
   - 编辑资源信息（版本、密码）。
-  - 删除资源（受保护资源会同时删除仓库文件）。
-  - 开启/关闭反应墙。
-  - 设置自定义反应表情。
+  - 删除资源。
 
 ### `/协作者`
-
-所有子命令只在服务器内使用，回复为私密消息。
 
 | 命令 | 用途 | 指定他人原作者 ID 的权限 |
 | --- | --- | --- |
@@ -195,6 +150,9 @@ src/
 单个资源交付计一次，心愿单一页取链或导出也只计一次。
 重复取链仍计数；空心愿单、打开下载列表、普通列表翻页、加入/移除收藏和作者维护不扣交付额度。
 
+## 架构
+
+[查看架构文档](docs/technical_architecture.md)
 
 ## 开发指南
 
