@@ -112,11 +112,7 @@ class EventHandlerCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_resource_downloaded(self, resource: ResourceDTO):
-        """
-        监听 on_resource_downloaded 事件，并增加下载计数。
-        """
-        logger.info(f"接收到 resource_downloaded 事件，资源 ID: {resource.id}")
-
+        """监听资源下载事件并增加下载计数。"""
         try:
             async with AsyncSessionLocal() as session:
                 async with session.begin():
