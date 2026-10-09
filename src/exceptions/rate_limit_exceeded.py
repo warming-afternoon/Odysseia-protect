@@ -13,7 +13,7 @@ class RateLimitExceeded(Exception):
     @property
     def message(self) -> str:
         """根据命中限制生成可直接发送给用户的提示。"""
-        # 日限制优先提示次日重置，分钟限制提示剩余等待秒数。
+        # 隐藏具体额度，保留重置时间和剩余等待秒数。
         if "daily_rate_limit" in self.result.reasons:
-            return f"⏳ 今日资源交付已达到 {self.result.daily_limit} 次，请在北京时间次日零点后重试（约 {self.result.reset_after} 秒）。"
+            return f"⏳ 今日资源获取已达上限，请在北京时间次日零点后重试（约 {self.result.reset_after} 秒）。"
         return f"⏳ 资源获取过于频繁，请等待 {self.result.reset_after} 秒后重试。"
