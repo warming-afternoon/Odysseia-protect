@@ -8,19 +8,20 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.cogs.wishlist_cog import WishlistCog
-from src.models import WishlistItem
-from src.enums import UploadMode
 from src.database.repositories.resource import ResourceRepository
 from src.database.repositories.thread import ThreadRepository
 from src.database.repositories.user import UserRepository
 from src.database.repositories.wishlist import WishlistRepository
-from src.database.schemas import ResourceCreate, ThreadCreate, UserCreate
 from src.dto.resource_dto import ResourceDTO
-from src.enums import SourceStatus
+from src.dto.wishlist_page import WishlistPage
+from src.dto.wishlist_page_entry import WishlistPageEntry
+from src.enums import SourceStatus, UploadMode
+from src.models import WishlistItem
+from src.qo.resource_create import ResourceCreate
+from src.qo.thread_create import ThreadCreate
+from src.qo.user_create import UserCreate
 from src.services.wishlist_service import (
     WISHLIST_PAGE_SIZE,
-    WishlistPage,
-    WishlistPageEntry,
     WishlistService,
 )
 from src.ui.wishlist_ui import build_wishlist_consent_embed, build_wishlist_render
@@ -296,11 +297,14 @@ async def test_wishlist_consent_does_not_grant_upload_consent(
         WishlistRepository(),
     )
 
-    assert await service.accept_policy_and_add(
-        db_session,
-        user_id=456,
-        resource_id=resource.id,
-    ) == "added"
+    assert (
+        await service.accept_policy_and_add(
+            db_session,
+            user_id=456,
+            resource_id=resource.id,
+        )
+        == "added"
+    )
 
     user = await user_repo.get(db_session, id=456)
     assert user is not None
@@ -325,12 +329,8 @@ async def test_wishlist_service_marks_only_failed_url_unavailable(
     first = await create_resource(db_session, resource_id_seed=1)
     second = await create_resource(db_session, resource_id_seed=2)
     await db_session.flush()
-    await wishlist_repo.add_idempotent(
-        db_session, user_id=123, resource_id=first.id
-    )
-    await wishlist_repo.add_idempotent(
-        db_session, user_id=123, resource_id=second.id
-    )
+    await wishlist_repo.add_idempotent(db_session, user_id=123, resource_id=first.id)
+    await wishlist_repo.add_idempotent(db_session, user_id=123, resource_id=second.id)
     await db_session.flush()
 
     bot = MagicMock()
@@ -410,16 +410,22 @@ async def test_wishlist_service_uses_six_items_and_clamps_after_last_page_delete
     assert len(refreshed.entries) == 6
 
     remaining_ids = tuple(entry.item_id for entry in refreshed.entries)
-    assert await service.remove_items(
-        db_session,
-        user_id=123,
-        item_ids=remaining_ids,
-    ) == 6
-    assert await service.remove_items(
-        db_session,
-        user_id=123,
-        item_ids=remaining_ids,
-    ) == 0
+    assert (
+        await service.remove_items(
+            db_session,
+            user_id=123,
+            item_ids=remaining_ids,
+        )
+        == 6
+    )
+    assert (
+        await service.remove_items(
+            db_session,
+            user_id=123,
+            item_ids=remaining_ids,
+        )
+        == 0
+    )
     empty_page = await service.get_page(db_session, user_id=123, page=1)
 
     assert empty_page.page == 1
@@ -541,7 +547,9 @@ async def test_wishlist_cards_keep_remove_enabled_for_all_download_states():
     assert len(remove_buttons) == 3
     assert all(not button.disabled for button in remove_buttons)
     assert next(button for button in buttons if button.label == "打开下载链接")
-    assert next(button for button in buttons if button.label == "URL 见导出内容").disabled
+    assert next(
+        button for button in buttons if button.label == "URL 见导出内容"
+    ).disabled
     assert next(button for button in buttons if button.label == "资源不可用").disabled
 
 
@@ -565,8 +573,7 @@ async def test_remove_page_button_uses_rendered_item_id_snapshot():
     remove_page_button = next(
         item
         for item in render.view.walk_children()
-        if isinstance(item, discord.ui.Button)
-        and item.label == "移除本页全部项"
+        if isinstance(item, discord.ui.Button) and item.label == "移除本页全部项"
     )
     session = MagicMock()
     session.commit = AsyncMock()
@@ -581,7 +588,7 @@ async def test_remove_page_button_uses_rendered_item_id_snapshot():
     )
 
     with patch(
-        "src.ui.wishlist_ui.AsyncSessionLocal",
+        "src.ui.wishlist_view.AsyncSessionLocal",
         return_value=session_context,
     ):
         await remove_page_button.callback(interaction)
@@ -637,7 +644,7 @@ async def test_single_remove_rolls_back_and_keeps_panel_on_database_error():
     )
 
     with patch(
-        "src.ui.wishlist_ui.AsyncSessionLocal",
+        "src.ui.wishlist_view.AsyncSessionLocal",
         return_value=session_context,
     ):
         await remove_button.callback(interaction)
@@ -682,8 +689,7 @@ async def test_wishlist_v2_overflow_falls_back_to_txt():
     assert render.view.total_children_count == 40
     assert render.view.content_length() <= 4000
     assert any(
-        isinstance(item, discord.ui.File)
-        for item in render.view.walk_children()
+        isinstance(item, discord.ui.File) for item in render.view.walk_children()
     )
 
 

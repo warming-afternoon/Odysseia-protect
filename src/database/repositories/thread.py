@@ -3,9 +3,10 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.enums import SourceStatus
-
 from src.models import Thread
-from ..schemas import ThreadCreate, ThreadUpdate
+from src.qo.thread_create import ThreadCreate
+from src.qo.thread_update import ThreadUpdate
+
 from .base import BaseRepository
 
 

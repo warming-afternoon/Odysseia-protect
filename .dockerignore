@@ -30,3 +30,5 @@ tests/
 
 # Local data
 data/
+# Runtime logs
+logs/

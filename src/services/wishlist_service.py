@@ -1,21 +1,22 @@
 import asyncio
 import logging
 import math
-from dataclasses import dataclass
-from datetime import datetime
 from typing import Literal, Sequence
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.enums.wishlist import WISHLIST_PAGE_SIZE
-from src.models import WishlistItem
 from src.database.repositories.resource import ResourceRepository
 from src.database.repositories.thread import ThreadRepository
 from src.database.repositories.user import UserRepository
 from src.database.repositories.wishlist import WishlistRepository
-from src.database.schemas import UserCreate
 from src.dto.resource_dto import ResourceDTO
+from src.dto.wishlist_page import WishlistPage
+from src.dto.wishlist_page_entry import WishlistPageEntry
+from src.enums.wishlist import WISHLIST_PAGE_SIZE
+from src.models import WishlistItem
+from src.qo.user_create import UserCreate
 from src.services.base import BaseService
+from src.utils.download_guard import require_delivery, update_operation
 
 logger = logging.getLogger(__name__)
 
@@ -26,23 +27,6 @@ WishlistMutationResult = Literal[
     "not_found",
     "needs_consent",
 ]
-
-
-@dataclass(frozen=True)
-class WishlistPageEntry:
-    item_id: int
-    resource: ResourceDTO
-    created_at: datetime
-    url: str | None
-    error: str | None = None
-
-
-@dataclass(frozen=True)
-class WishlistPage:
-    entries: list[WishlistPageEntry]
-    page: int
-    max_page: int
-    total: int
 
 
 class WishlistService(BaseService):
@@ -56,6 +40,7 @@ class WishlistService(BaseService):
         user_repo: UserRepository,
         wishlist_repo: WishlistRepository,
     ):
+        """保存服务及仓储依赖。"""
         super().__init__(bot, resource_repo, thread_repo, user_repo)
         self.wishlist_repo = wishlist_repo
 
@@ -66,6 +51,7 @@ class WishlistService(BaseService):
         user_id: int,
         resource_id: int,
     ) -> bool:
+        """查询当前资源是否属于用户心愿单。"""
         return await self.wishlist_repo.is_wishlisted(
             session,
             user_id=user_id,
@@ -79,6 +65,7 @@ class WishlistService(BaseService):
         user_id: int,
         resource_id: int,
     ) -> WishlistMutationResult:
+        """检查协议与资源后幂等添加心愿单项目。"""
         if await self.resource_repo.get(session, id=resource_id) is None:
             return "not_found"
 
@@ -100,6 +87,7 @@ class WishlistService(BaseService):
         user_id: int,
         resource_id: int,
     ) -> WishlistMutationResult:
+        """保存协议同意状态并添加心愿单项目。"""
         if await self.resource_repo.get(session, id=resource_id) is None:
             return "not_found"
 
@@ -135,6 +123,7 @@ class WishlistService(BaseService):
         user_id: int,
         resource_id: int,
     ) -> WishlistMutationResult:
+        """移除用户的单个收藏资源。"""
         removed = await self.wishlist_repo.remove_for_user(
             session,
             user_id=user_id,
@@ -149,6 +138,7 @@ class WishlistService(BaseService):
         user_id: int,
         item_ids: Sequence[int],
     ) -> int:
+        """按页面快照批量移除用户收藏项目。"""
         return await self.wishlist_repo.remove_items_for_user(
             session,
             user_id=user_id,
@@ -157,6 +147,7 @@ class WishlistService(BaseService):
 
     @staticmethod
     def _to_resource_dto(item: WishlistItem) -> ResourceDTO:
+        """将已预加载关联的收藏资源转换为独立 DTO。"""
         resource = item.resource
         return ResourceDTO(
             id=resource.id,
@@ -181,6 +172,7 @@ class WishlistService(BaseService):
         user_id: int,
         page: int,
     ) -> WishlistPage:
+        """按用户额度取得整页资源交付数据。"""
         total = await self.wishlist_repo.count_for_user(session, user_id=user_id)
         max_page = max(1, math.ceil(total / WISHLIST_PAGE_SIZE))
         safe_page = min(max(1, page), max_page)
@@ -196,12 +188,16 @@ class WishlistService(BaseService):
         if download_service is None:
             raise RuntimeError("Bot 未配置下载服务。")
 
+        # 关联数据已由仓储预加载，整页取链前只申请一次额度。
+        update_operation(page=safe_page)
+        if resource_dtos:
+            await require_delivery(self.bot, user_id)
+
         async def fetch_url(resource: ResourceDTO) -> str:
+            """调用底层交付方法，不重复扣整页额度。"""
             if not resource.trace_enabled:
                 return await download_service.fetch_fresh_url(resource)
-            delivery = await download_service.fetch_delivery(
-                resource, user_id=user_id
-            )
+            delivery = await download_service.fetch_delivery(resource, user_id=user_id)
             if not delivery.url:
                 raise RuntimeError("R2 暂不可用，请从下载面板获取私密附件")
             return delivery.url
@@ -214,6 +210,7 @@ class WishlistService(BaseService):
         entries: list[WishlistPageEntry] = []
         for item, resource, result in zip(items, resource_dtos, results):
             if isinstance(result, BaseException):
+                update_operation(outcome="partial_failure")
                 logger.warning(
                     "心愿单资源 %s 取链失败: %s",
                     resource.id,
@@ -252,6 +249,7 @@ class WishlistService(BaseService):
         user_id: int,
         page: int,
     ):
+        """通过独立分页 DTO 构建心愿单展示结果。"""
         from src.ui.wishlist_ui import build_wishlist_render
 
         page_data = await self.get_page(

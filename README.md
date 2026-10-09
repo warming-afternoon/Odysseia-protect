@@ -118,12 +118,14 @@ src/
 5. 关闭 Bot 
 - windows 部署
 
-CTrl + C
+   ```bash
+   Ctrl + C
+   ```
 
 - docker 部署
 
    ```bash
-   docker compose up down
+   docker compose down
    ```
 
 
@@ -173,12 +175,11 @@ CTrl + C
 | `/协作者 移除 用户 [原作者id]` | 撤销协作者权限 | 仅管理组与帖子作者 |
 | `/协作者 列表 [原作者id]` | 查看名单，每页 20 人 | 任何人 |
 
-- 不填 `原作者id` 时操作自己的名单。`用户` 可填 `@用户`、`<@用户ID>` 或数字用户 ID，原作者参数填数字 ID；离服或失联账号不需要被用户选择器找到。
+- 不填 `原作者id` 时操作自己的名单。`用户` 可填 `@用户`、`<@用户ID>` 或数字用户 ID，原作者参数填数字 ID；
 - 例如：作者使用 `/协作者 添加 用户:@小号` 授权；大号失联时，管理组使用 `/协作者 添加 用户:@小号 原作者id:大号ID`。
 - 授权覆盖原作者在 Bot 所在所有服务器的现有和未来帖子；一个作者可有多个协作者，同一协作者也可维护多个作者。
 - 协作者可上传普通及受保护资源、编辑版本信息和密码、换源、删除资源、切换快捷模式；协作者不能修改原作者的授权名单，授权关系不传递。
 - 管理组复用 `TRACE_ADMIN_USER_IDS`、`TRACE_ADMIN_ROLE_IDS`，可管理任意原作者的全局名单。该权限独立于动态溯源开关，也不会自动赋予资源维护权限。
-- 每位协作者首次上传时需自行同意资源上传协议，不能沿用原作者的同意记录。
 
 ### `/使用手册`
 显示详细的使用手册（内容来自 `src/config.py`）。
@@ -188,33 +189,12 @@ CTrl + C
 - `/溯源 核验`：管理员命令，直接弹出 File Upload Modal，一次上传 1～10 个 PNG、ZIP 或 7z。
 - `/溯源 报告 report_id`：查询排队中、处理中、已完成或失败的核验任务。
 
-## 数据库设计
+## 资源交付限流
 
-使用 SQLAlchemy ORM，主要表包括：
+默认每位 Discord 用户允许 **30 次/60 秒、400 次/北京时间自然日**，跨帖子和服务器共享额度。
+单个资源交付计一次，心愿单一页取链或导出也只计一次。
+重复取链仍计数；空心愿单、打开下载列表、普通列表翻页、加入/移除收藏和作者维护不扣交付额度。
 
-- **threads**：帖子关联信息。
-  - `public_thread_id`：公开帖子 ID。
-  - `warehouse_thread_id`：对应的私密仓库帖子 ID（仅受保护文件使用）。
-  - `author_id`：帖子作者 Discord ID。
-  - `reaction_required`：是否启用反应墙。
-  - `reaction_emoji`：自定义反应表情。
-
-- **resources**：资源信息。
-  - `thread_id`：所属帖子 ID。
-  - `upload_mode`：上传模式（SECURE/NORMAL）。
-  - `filename`：文件名。
-  - `version_info`：版本信息。
-  - `source_message_id`：源消息 ID（普通文件为公开消息 ID，受保护文件为仓库消息 ID）。
-  - `password`：下载密码（可选）。
-
-- **author_collaborators**：跨服协作者授权。
-  - `author_id`、`collaborator_id`：原作者及协作者 Discord ID，组合唯一。
-  - `granted_by`、`created_at`：授权操作人及创建时间。
-  - 不依赖用户已使用 Bot，也不关联特定帖子或服务器。
-
-- **users**：用户信息。
-  - `id`：Discord 用户 ID。
-  - `has_agreed_to_privacy_policy`：是否同意隐私协议。
 
 ## 开发指南
 
@@ -224,12 +204,6 @@ CTrl + C
 2. **新增业务逻辑**：在 `src/services/` 下编写 Service 类。
 3. **新增 UI 组件**：在 `src/ui/` 下创建 View 或 Modal。
 4. **数据库变更**：使用 Alembic 创建迁移脚本。
-
-### 运行测试
-
-```bash
-pytest
-```
 
 ### 代码风格
 
@@ -257,16 +231,11 @@ pytest
 - 检查 `WAREHOUSE_CHANNEL_ID` 是否配置正确，且 Bot 有权限访问该论坛频道。
 - 确保仓库频道是 **论坛频道（Forum Channel）**。
 
-### 2. 反应墙不生效
-- 反应墙仅对 **受保护资源** 生效。
-- 确保已正确设置反应表情（或留空允许任意表情）。
-- 检查 Bot 是否有读取消息反应的权限。
-
-### 3. 下载链接过期
+### 2. 下载链接过期
 - Discord 附件链接默认有时效性（约 24 小时）。
 - Bot 在下载时动态获取最新链接，确保链接有效。
 
-### 4. 数据库迁移
+### 3. 数据库迁移
 若修改了模型，使用 Alembic 生成迁移：
 ```bash
 alembic revision --autogenerate -m "描述"

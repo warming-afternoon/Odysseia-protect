@@ -67,3 +67,6 @@ ENV/
 # odysseia-protect specific
 /src/odysseia_protect.egg-info/
 temp/
+
+# Runtime logs
+logs/

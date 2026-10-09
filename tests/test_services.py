@@ -1,19 +1,21 @@
-from src.ui.download_panel import build_download_panel
-import pytest
-import discord
 from unittest.mock import AsyncMock, MagicMock
 
+import discord
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.services.upload_service import UploadService
-from src.enums.download_panel_mode import DownloadPanelMode
-from src.services.download_service import DownloadService
-from src.services.management_service import ManagementService
 from src.database.repositories.resource import ResourceRepository
 from src.database.repositories.thread import ThreadRepository
 from src.database.repositories.user import UserRepository
-from src.database.schemas import ResourceCreate, ThreadCreate, UserCreate
 from src.enums import UploadMode
+from src.enums.download_panel_mode import DownloadPanelMode
+from src.qo.resource_create import ResourceCreate
+from src.qo.thread_create import ThreadCreate
+from src.qo.user_create import UserCreate
+from src.services.download_service import DownloadService
+from src.services.management_service import ManagementService
+from src.services.upload_service import UploadService
+from src.ui.download_panel import build_download_panel
 from src.ui.public_resource_select_view import PublicResourceSelectView
 from src.ui.resource_select_view import ResourceSelectView
 
@@ -26,7 +28,6 @@ def management_interaction(thread):
     interaction.channel.owner_id = thread.author_id
     interaction.guild.id = thread.guild_id or 123
     return interaction
-
 
 
 @pytest.mark.asyncio
@@ -121,6 +122,7 @@ class TestUploadService:
 
         assert isinstance(result, NormalUploadModal)
 
+
 @pytest.mark.asyncio
 class TestDownloadService:
     """测试 DownloadService 的功能。"""
@@ -143,7 +145,8 @@ class TestDownloadService:
         mock_interaction.channel.id = 12345
 
         result = await build_download_panel(
-            service, session=db_session,
+            service,
+            session=db_session,
             source=mock_interaction,
         )
 
@@ -191,7 +194,8 @@ class TestDownloadService:
         mock_interaction.channel.id = 555
 
         result = await build_download_panel(
-            service, session=db_session,
+            service,
+            session=db_session,
             source=mock_interaction,
         )
 
@@ -202,7 +206,8 @@ class TestDownloadService:
         assert isinstance(result["view"], ResourceSelectView)
 
         public_result = await build_download_panel(
-            service, session=db_session,
+            service,
+            session=db_session,
             source=mock_interaction,
             panel_mode=DownloadPanelMode.PUBLIC_GATEWAY,
         )

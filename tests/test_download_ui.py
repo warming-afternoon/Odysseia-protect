@@ -5,13 +5,12 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 import discord
 import pytest
 
-from src.enums import UploadMode
-from src.enums import SourceStatus
-from src.dto.resource_dto import ResourceDTO
-from src.ui.download_embed_builder import DownloadEmbedBuilder
 from src.dto.download_page_dto import DownloadPageDTO
 from src.dto.download_resource_option_dto import DownloadResourceOptionDTO
+from src.dto.resource_dto import ResourceDTO
+from src.enums import SourceStatus, UploadMode
 from src.enums.download_response_mode import DownloadResponseMode
+from src.ui.download_embed_builder import DownloadEmbedBuilder
 from src.ui.password_modal import PasswordModal
 from src.ui.public_resource_select_view import PublicResourceSelectView
 from src.ui.resource_select_view import ResourceSelectView
@@ -21,7 +20,10 @@ def make_page(resources, *, total=None, page=1):
     ordered = resources
     count = len(ordered) if total is None else total
     return DownloadPageDTO(
-        public_thread_id=300, guild_id=400, total=count, page=page,
+        public_thread_id=300,
+        guild_id=400,
+        total=count,
+        page=page,
         max_page=max(1, (count + 24) // 25),
         items=tuple(DownloadResourceOptionDTO.model_validate(r) for r in ordered),
     )
@@ -69,7 +71,9 @@ def test_download_embed_skips_preview_for_non_image():
         public_thread_id=3,
     )
 
-    embed = DownloadEmbedBuilder.build_download_embed(resource, "https://example.com/cards.zip")
+    embed = DownloadEmbedBuilder.build_download_embed(
+        resource, "https://example.com/cards.zip"
+    )
 
     assert embed.image.url is None
 
@@ -87,6 +91,8 @@ def make_resource(
         password=password,
         trace_enabled=False,
         source_message_id=resource_id + 100,
+        public_thread_id=300,
+        guild_id=400,
         upload_mode=UploadMode.SECURE,
         created_at=datetime(2026, 9, 5, 12, 34, 56),
         thread=SimpleNamespace(
@@ -145,9 +151,7 @@ def test_download_select_uses_na_for_missing_filename():
 
     view = make_private_view([resource])
 
-    assert view.children[0].options[0].description == (
-        "2026/09/05 · 文件名: N/A"
-    )
+    assert view.children[0].options[0].description == ("2026/09/05 · 文件名: N/A")
 
 
 @pytest.mark.asyncio
@@ -208,9 +212,7 @@ async def test_resource_select_replaces_result_embed_in_private_panel():
     download_service.fetch_fresh_url = AsyncMock(
         side_effect=["https://example.com/v1.png", "https://example.com/v2.png"]
     )
-    embed_builder = MagicMock(
-        side_effect=[first_download_embed, second_download_embed]
-    )
+    embed_builder = MagicMock(side_effect=[first_download_embed, second_download_embed])
     interaction = make_interaction(download_service)
 
     interaction.client.download_service.get_selected_resource = AsyncMock(
@@ -269,7 +271,9 @@ async def test_public_download_gateway_creates_private_complete_panel():
     public_message = SimpleNamespace(edit=AsyncMock())
     interaction.message = public_message
 
-    interaction.client.download_service.get_selected_resource = AsyncMock(return_value=resource)
+    interaction.client.download_service.get_selected_resource = AsyncMock(
+        return_value=resource
+    )
 
     with (
         patch(
@@ -314,7 +318,9 @@ async def test_public_password_selection_creates_private_complete_panel():
     interaction = make_interaction(download_service)
     public_message = SimpleNamespace(edit=AsyncMock())
     interaction.message = public_message
-    interaction.client.download_service.get_selected_resource = AsyncMock(return_value=resource)
+    interaction.client.download_service.get_selected_resource = AsyncMock(
+        return_value=resource
+    )
 
     with (
         patch(
@@ -365,7 +371,9 @@ async def test_private_password_selection_only_opens_modal_without_editing_panel
     interaction = make_interaction(MagicMock())
     private_message = SimpleNamespace(edit=AsyncMock())
     interaction.message = private_message
-    interaction.client.download_service.get_selected_resource = AsyncMock(return_value=resource)
+    interaction.client.download_service.get_selected_resource = AsyncMock(
+        return_value=resource
+    )
 
     with (
         patch(
@@ -396,7 +404,9 @@ async def test_public_download_gateway_reports_link_failure_privately():
     interaction = make_interaction(download_service)
     public_message = SimpleNamespace(edit=AsyncMock())
     interaction.message = public_message
-    interaction.client.download_service.get_selected_resource = AsyncMock(return_value=resource)
+    interaction.client.download_service.get_selected_resource = AsyncMock(
+        return_value=resource
+    )
 
     with (
         patch(
@@ -411,10 +421,7 @@ async def test_public_download_gateway_reports_link_failure_privately():
         thinking=True,
     )
     interaction.edit_original_response.assert_awaited_once_with(
-        content=(
-            "❌ 抱歉，获取下载链接时发生错误。"
-            "源文件可能已被删除或Bot无法访问。"
-        ),
+        content=("❌ 抱歉，获取下载链接时发生错误。源文件可能已被删除或Bot无法访问。"),
         embeds=[],
         view=None,
     )
@@ -439,7 +446,9 @@ async def test_resource_select_failure_keeps_panel_and_sends_private_error():
     )
     interaction = make_interaction(download_service)
 
-    interaction.client.download_service.get_selected_resource = AsyncMock(return_value=resource)
+    interaction.client.download_service.get_selected_resource = AsyncMock(
+        return_value=resource
+    )
 
     with (
         patch(
@@ -464,7 +473,9 @@ async def test_expired_resource_select_points_to_available_download_entries():
     interaction = make_interaction(MagicMock())
     view.stop()
 
-    interaction.client.download_service.get_selected_resource = AsyncMock(return_value=resource)
+    interaction.client.download_service.get_selected_resource = AsyncMock(
+        return_value=resource
+    )
 
     with (
         patch(

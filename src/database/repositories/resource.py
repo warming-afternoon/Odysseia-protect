@@ -1,11 +1,13 @@
 from typing import Sequence
+
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from sqlalchemy.orm import joinedload
 
 from src.models import Resource
-from ..schemas import ResourceCreate, ResourceUpdate
+from src.qo.resource_create import ResourceCreate
+from src.qo.resource_update import ResourceUpdate
+
 from .base import BaseRepository
 
 
@@ -20,8 +22,10 @@ class ResourceRepository(BaseRepository[Resource, ResourceCreate, ResourceUpdate
     async def count_by_thread_id(self, session: AsyncSession, *, thread_id: int) -> int:
         """统计指定帖子中的资源版本总数。"""
         # 仅统计资源表，避免加载完整资源列表。
-        statement = select(func.count()).select_from(self.model).where(
-            self.model.thread_id == thread_id
+        statement = (
+            select(func.count())
+            .select_from(self.model)
+            .where(self.model.thread_id == thread_id)
         )
         return int(await session.scalar(statement) or 0)
 
@@ -39,7 +43,9 @@ class ResourceRepository(BaseRepository[Resource, ResourceCreate, ResourceUpdate
         )
         return (await session.execute(statement)).scalars().all()
 
-    async def increment_download_count(self, session: AsyncSession, *, resource_id: int) -> bool:
+    async def increment_download_count(
+        self, session: AsyncSession, *, resource_id: int
+    ) -> bool:
         """原子增加一个资源的下载次数并返回是否存在。"""
         # 使用数据库表达式更新，避免并发下载丢失计数。
         result = await session.execute(
