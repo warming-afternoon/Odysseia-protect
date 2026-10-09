@@ -11,9 +11,11 @@ from src.dto.download_resource_option_dto import DownloadResourceOptionDTO
 from src.dto.resource_dto import ResourceDTO
 from src.enums import UploadMode
 from src.qo.download_page_qo import DownloadPageQo
+from src.qo.resource_delivery_qo import ResourceDeliveryQo
 from src.qo.resource_selection_qo import ResourceSelectionQo
 from src.services.base import BaseService
 from src.services.delivery_service import DeliveryResult
+from src.utils.download_guard import require_delivery, update_operation
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +23,9 @@ logger = logging.getLogger(__name__)
 class DownloadService(BaseService):
     """协调帖子与资源数据并提供下载交付。"""
 
-    async def get_page(self, session: AsyncSession, qo: DownloadPageQo) -> DownloadPageDTO:
+    async def get_page(
+        self, session: AsyncSession, qo: DownloadPageQo
+    ) -> DownloadPageDTO:
         """查询资源页并在会话内转换为独立的分页数据。"""
         # 一次查询取得共用的帖子元数据，不访问每个资源的关联。
         thread = await self.thread_repo.get_by_public_thread_id(
@@ -31,17 +35,24 @@ class DownloadService(BaseService):
             return DownloadPageDTO(public_thread_id=qo.public_thread_id)
 
         # 统计总数后校正页码，再通过数据库分页读取当前资源。
-        total = await self.resource_repo.count_by_thread_id(session, thread_id=thread.id)
+        total = await self.resource_repo.count_by_thread_id(
+            session, thread_id=thread.id
+        )
         max_page = max(1, math.ceil(total / DOWNLOAD_PAGE_SIZE))
         page = min(qo.page, max_page)
         resources = await self.resource_repo.get_page_by_thread_id(
-            session, thread_id=thread.id,
-            offset=(page - 1) * DOWNLOAD_PAGE_SIZE, limit=DOWNLOAD_PAGE_SIZE,
+            session,
+            thread_id=thread.id,
+            offset=(page - 1) * DOWNLOAD_PAGE_SIZE,
+            limit=DOWNLOAD_PAGE_SIZE,
         )
         return DownloadPageDTO(
-            public_thread_id=qo.public_thread_id, guild_id=thread.guild_id,
+            public_thread_id=qo.public_thread_id,
+            guild_id=thread.guild_id,
             items=tuple(DownloadResourceOptionDTO.model_validate(r) for r in resources),
-            page=page, total=total, max_page=max_page,
+            page=page,
+            total=total,
+            max_page=max_page,
         )
 
     async def get_selected_resource(
@@ -58,19 +69,27 @@ class DownloadService(BaseService):
         if thread is None or resource.thread_id != thread.id:
             return None
         return ResourceDTO(
-            id=resource.id, filename=resource.filename, version_info=resource.version_info,
-            password=resource.password, source_message_id=resource.source_message_id,
+            id=resource.id,
+            filename=resource.filename,
+            version_info=resource.version_info,
+            password=resource.password,
+            source_message_id=resource.source_message_id,
             warehouse_thread_id=thread.warehouse_thread_id,
-            public_thread_id=thread.public_thread_id, author_id=thread.author_id,
-            guild_id=thread.guild_id, public_thread_name=thread.public_thread_name,
-            source_status=thread.source_status, upload_mode=resource.upload_mode,
+            public_thread_id=thread.public_thread_id,
+            author_id=thread.author_id,
+            guild_id=thread.guild_id,
+            public_thread_name=thread.public_thread_name,
+            source_status=thread.source_status,
+            upload_mode=resource.upload_mode,
             trace_enabled=resource.trace_enabled,
         )
 
     async def increment_download_count(self, session: AsyncSession, resource_id: int):
         """将下载计数事件交给资源仓储处理。"""
         # 保留事件服务接口，由仓储执行单表原子更新。
-        if not await self.resource_repo.increment_download_count(session, resource_id=resource_id):
+        if not await self.resource_repo.increment_download_count(
+            session, resource_id=resource_id
+        ):
             logger.warning("下载计数资源已不存在：%s", resource_id)
 
     async def fetch_fresh_url(self, resource: ResourceDTO) -> str:
@@ -124,3 +143,22 @@ class DownloadService(BaseService):
             user_id=user_id,
             source_loader=lambda: self.fetch_source_bytes(resource),
         )
+
+
+async def request_resource_delivery(
+    bot, resource: ResourceDTO, *, qo: ResourceDeliveryQo
+) -> DeliveryResult:
+    """检查单资源交付额度后返回独立交付 DTO。"""
+    update_operation(
+        resource_id=resource.id,
+        thread_id=resource.public_thread_id,
+        guild_id=resource.guild_id,
+    )
+    # 单资源只在实际交付前扣一次额度，心愿单使用底层取链方法。
+    await require_delivery(bot, qo.user_id)
+    if resource.trace_enabled:
+        return await bot.download_service.fetch_delivery(resource, user_id=qo.user_id)
+    return DeliveryResult(
+        filename=resource.filename or "resource",
+        url=await bot.download_service.fetch_fresh_url(resource),
+    )

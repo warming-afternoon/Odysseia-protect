@@ -9,7 +9,15 @@ import discord
 
 from src.config import TRACE_DOWNLOAD_CONSENT_TEXT
 from src.dto.resource_dto import ResourceDTO
+from src.exceptions.rate_limit_exceeded import RateLimitExceeded
+from src.qo.resource_delivery_qo import ResourceDeliveryQo
+from src.services.download_service import request_resource_delivery
 from src.ui.download_embed_builder import DownloadEmbedBuilder
+from src.utils.download_guard import (
+    observe_download,
+    send_rate_limit_message,
+    update_operation,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,9 +62,8 @@ class TraceConsentView(discord.ui.View):
         return False
 
     @discord.ui.button(label="同意并生成", style=discord.ButtonStyle.success)
-    async def agree(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ):
+    @observe_download("trace_consent_agree")
+    async def agree(self, interaction: discord.Interaction, button: discord.ui.Button):
         """生成个性化文件并展示当前页的个人下载面板。"""
         # 确认视图持有独立面板，不影响原下载面板的翻页。
         await interaction.response.defer(ephemeral=True, thinking=True)
@@ -68,8 +75,10 @@ class TraceConsentView(discord.ui.View):
             service = getattr(interaction.client, "download_service", None)
             if service is None:
                 raise RuntimeError("Bot 未配置下载服务。")
-            delivery = await service.fetch_delivery(
-                self.resource, user_id=interaction.user.id
+            delivery = await request_resource_delivery(
+                interaction.client,
+                self.resource,
+                qo=ResourceDeliveryQo(user_id=interaction.user.id),
             )
             interaction.client.dispatch("resource_downloaded", self.resource)
             if hasattr(panel_view, "authorize_selection"):
@@ -90,7 +99,10 @@ class TraceConsentView(discord.ui.View):
                 view=panel_view,
                 attachments=attachments,
             )
+        except RateLimitExceeded as error:
+            await send_rate_limit_message(interaction, error, replace_response=True)
         except Exception:
+            update_operation(outcome="failed")
             logger.exception("生成动态溯源交付失败：resource=%s", self.resource.id)
             await interaction.edit_original_response(
                 content="❌ 生成包括溯源水印的资源文件时失败，请稍后重试。",
@@ -100,10 +112,16 @@ class TraceConsentView(discord.ui.View):
             )
 
     @discord.ui.button(label="拒绝", style=discord.ButtonStyle.danger)
+    @observe_download("trace_consent_decline")
     async def disagree(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
         """拒绝动态溯源下载并关闭确认面板。"""
+        update_operation(
+            resource_id=self.resource.id,
+            thread_id=self.resource.public_thread_id,
+            outcome="declined",
+        )
         await interaction.response.edit_message(
             content="⚠️ 您已拒绝动态溯源，不能下载本资源。",
             embed=None,

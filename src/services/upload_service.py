@@ -11,13 +11,14 @@ import discord
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import TRACE_MAX_SOURCE_BYTES, UPLOAD_PRIVACY_POLICY_TEXT
-from src.enums import UploadMode
-from src.database.schemas import ResourceCreate, ThreadCreate, UserCreate
-from src.enums import SourceStatus
+from src.enums import SourceStatus, UploadMode
+from src.qo.resource_create import ResourceCreate
+from src.qo.thread_create import ThreadCreate
+from src.qo.user_create import UserCreate
 from src.services.base import BaseService
-from src.ui.upload_ui import PrivacyPolicyView, NormalUploadModal, SecureUploadModal
-from src.utils.discord_utils import parse_message_link
+from src.ui.upload_ui import NormalUploadModal, PrivacyPolicyView, SecureUploadModal
 from src.utils.auth import require_thread_manager
+from src.utils.discord_utils import parse_message_link
 
 logger = logging.getLogger(__name__)
 
@@ -50,9 +51,7 @@ class UploadService(BaseService):
         detail_parts = []
         for name, size in oversized:
             safe_name = name.replace("`", "'")
-            detail_parts.append(
-                f"`{safe_name}`（{size / (1024 * 1024):.2f} MiB）"
-            )
+            detail_parts.append(f"`{safe_name}`（{size / (1024 * 1024):.2f} MiB）")
         details = ", ".join(detail_parts)
         raise ValueError(
             "动态溯源仅支持不超过 25 MB 的 PNG 角色卡；"
@@ -92,7 +91,9 @@ class UploadService(BaseService):
         if not thread_model:
             logger.info(f"帖子 {interaction.channel.id} 不存在，将创建新记录。")
             author_id = await require_thread_manager(
-                session, interaction=interaction, thread_repo=self.thread_repo,
+                session,
+                interaction=interaction,
+                thread_repo=self.thread_repo,
             )
             thread_data = ThreadCreate(
                 public_thread_id=interaction.channel.id,
@@ -166,9 +167,13 @@ class UploadService(BaseService):
         # 用户已同意，根据模式返回不同的模态框
         if mode == "secure":
             assert file is not None
-            return SecureUploadModal(service=self, files=file, user_id=interaction.user.id)
+            return SecureUploadModal(
+                service=self, files=file, user_id=interaction.user.id
+            )
         else:  # normal mode
-            return NormalUploadModal(service=self, message_link=message_link, user_id=interaction.user.id)
+            return NormalUploadModal(
+                service=self, message_link=message_link, user_id=interaction.user.id
+            )
 
     async def handle_secure_upload_from_message(
         self,
@@ -204,7 +209,10 @@ class UploadService(BaseService):
             }
 
         return SecureUploadModal(
-            service=self, files=message.attachments, source_message=message, user_id=interaction.user.id
+            service=self,
+            files=message.attachments,
+            source_message=message,
+            user_id=interaction.user.id,
         )
 
     async def handle_upload_submission(
@@ -243,7 +251,9 @@ class UploadService(BaseService):
                 session, interaction=interaction
             )
             await require_thread_manager(
-                session, interaction=interaction, thread_repo=self.thread_repo,
+                session,
+                interaction=interaction,
+                thread_repo=self.thread_repo,
                 thread_model=thread_model,
             )
 
@@ -333,18 +343,22 @@ class UploadService(BaseService):
                     interaction.channel, (discord.TextChannel, discord.Thread)
                 )
                 public_channel = interaction.channel
-                
+
                 # 获取原始名称
-                raw_name = public_channel.name if hasattr(public_channel, "name") else str(public_channel.id)
-                
+                raw_name = (
+                    public_channel.name
+                    if hasattr(public_channel, "name")
+                    else str(public_channel.id)
+                )
+
                 # 构造前缀
                 prefix = "📦 仓库 | "
-                
+
                 # 限制总长度在 100 以内 (Discord 限制)
                 # 我们取 95 位上限，并为可能的截断留出空间
                 limit = 100 - len(prefix)
                 if len(raw_name) > limit:
-                    safe_name = raw_name[:limit-3] + "..."
+                    safe_name = raw_name[: limit - 3] + "..."
                 else:
                     safe_name = raw_name
 
@@ -368,9 +382,19 @@ class UploadService(BaseService):
                     value=f"`{interaction.channel.id}`",
                     inline=False,
                 )
-                embed.add_field(name="👤 原作者", value=f"<@{thread_model.author_id}>", inline=True)
-                embed.add_field(name="🆔 原作者 ID", value=f"`{thread_model.author_id}`", inline=True)
-                embed.add_field(name="📤 上传操作人", value=f"{author.mention} (`{author.id}`)", inline=False)
+                embed.add_field(
+                    name="👤 原作者", value=f"<@{thread_model.author_id}>", inline=True
+                )
+                embed.add_field(
+                    name="🆔 原作者 ID",
+                    value=f"`{thread_model.author_id}`",
+                    inline=True,
+                )
+                embed.add_field(
+                    name="📤 上传操作人",
+                    value=f"{author.mention} (`{author.id}`)",
+                    inline=False,
+                )
 
                 # 创建帖子并发送 Embed
                 thread_with_message = await warehouse_forum.create_thread(
@@ -406,17 +430,13 @@ class UploadService(BaseService):
         assert isinstance(interaction.channel, (discord.TextChannel, discord.Thread))
         try:
             if trace_enabled:
-                traceability_service = getattr(
-                    self.bot, "traceability_service", None
-                )
+                traceability_service = getattr(self.bot, "traceability_service", None)
                 if traceability_service is None or not traceability_service.available:
                     raise ValueError("服务器尚未配置动态溯源密钥，暂时无法开启溯源。")
                 self._validate_trace_attachment_sizes([file])
                 source_data = await file.read()
                 self._validate_trace_source_data(file.filename, source_data)
-                traceability_service.validate_character_card(
-                    file.filename, source_data
-                )
+                traceability_service.validate_character_card(file.filename, source_data)
                 upload_file = discord.File(
                     io.BytesIO(source_data), filename=file.filename
                 )
@@ -471,7 +491,10 @@ class UploadService(BaseService):
     ) -> str:
         """处理来自多附件上传模态框的提交。"""
         try:
-            if source_message is not None and source_message.channel.id != interaction.channel.id:
+            if (
+                source_message is not None
+                and source_message.channel.id != interaction.channel.id
+            ):
                 raise PermissionError("只能转存当前帖子内的消息。")
             thread_model = await self._get_or_create_thread(
                 session, interaction=interaction
@@ -562,7 +585,9 @@ class UploadService(BaseService):
 
         # 1. 权限检查 (thread_model 已从外部传入)
         await require_thread_manager(
-            session, interaction=interaction, thread_repo=self.thread_repo,
+            session,
+            interaction=interaction,
+            thread_repo=self.thread_repo,
             thread_model=thread_model,
         )
 

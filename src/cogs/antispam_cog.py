@@ -5,8 +5,9 @@ from discord.ext import commands
 
 from src.config import ANTISPAM_KEYWORDS
 from src.database.database import AsyncSessionLocal
-from src.ui.download_panel import build_download_panel
 from src.enums.download_panel_mode import DownloadPanelMode
+from src.ui.download_panel import build_download_panel
+from src.utils.download_guard import observe_download
 
 if TYPE_CHECKING:
     from main import OdysseiaProtect
@@ -32,10 +33,16 @@ class AntiSpamCog(commands.Cog):
         ]:
             return
 
+        await self._send_panel(message)
+
+    @observe_download("download_keyword")
+    async def _send_panel(self, message: discord.Message):
+        """构建公开下载入口并记录观察用户的操作。"""
         # 在短会话内取得当前页数据并构建公开入口。
         async with AsyncSessionLocal() as session:
             response_data = await build_download_panel(
-                self.bot.download_service, session,
+                self.bot.download_service,
+                session,
                 source=message,
                 panel_mode=DownloadPanelMode.PUBLIC_GATEWAY,
             )

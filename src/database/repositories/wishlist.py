@@ -6,7 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from src.models import Resource, WishlistItem
-from ..schemas import WishlistItemCreate, WishlistItemUpdate
+from src.qo.wishlist_item_create import WishlistItemCreate
+from src.qo.wishlist_item_update import WishlistItemUpdate
+
 from .base import BaseRepository
 
 
@@ -118,9 +120,7 @@ class WishlistRepository(
         statement = (
             select(self.model)
             .where(self.model.user_id == user_id)
-            .options(
-                joinedload(self.model.resource).joinedload(Resource.thread)
-            )
+            .options(joinedload(self.model.resource).joinedload(Resource.thread))
             .order_by(self.model.created_at.desc(), self.model.id.desc())
             .offset(offset)
             .limit(limit)

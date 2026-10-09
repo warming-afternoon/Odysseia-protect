@@ -19,29 +19,35 @@ from src.database.repositories.resource import ResourceRepository
 from src.database.repositories.thread import ThreadRepository
 from src.database.repositories.user import UserRepository
 from src.database.repositories.wishlist import WishlistRepository
-from src.services.upload_service import UploadService
+from src.services.delivery_service import DeliveryService
 from src.services.download_service import DownloadService
 from src.services.management_service import ManagementService
-from src.services.wishlist_service import WishlistService
-from src.services.delivery_service import DeliveryService
 from src.services.object_store import R2ObjectStore
+from src.services.rate_limit_service import RateLimitService
 from src.services.traceability_service import TraceabilityService
+from src.services.upload_service import UploadService
 from src.services.verification_service import VerificationService
+from src.services.wishlist_service import WishlistService
+from src.utils.logging_setup import setup_logging
+
 # from src.services.reaction_wall_service import ReactionWallService
 
 
+logger = logging.getLogger(__name__)
+
+
 # --- 可选的 uvloop 性能加速 ---
-# 在非 Windows 系统上，尝试启用 uvloop 以获得更好的性能。
-# 如果未安装 uvloop，则会回退到标准的 asyncio 事件循环。
+# 在非 Windows 系统上启用 uvloop，未安装时使用默认事件循环。
+# 保存启动结果，待日志初始化后输出。
+_UVLOOP_STARTUP_MESSAGE = None
 if sys.platform != "win32":
     try:
         import uvloop
 
         uvloop.install()
-        logging.info("检测到非 Windows 环境，已成功启用 uvloop。")
+        _UVLOOP_STARTUP_MESSAGE = "检测到非 Windows 环境，已成功启用 uvloop。"
     except ImportError:
-        logging.info("未找到 uvloop，将使用默认的 asyncio 事件循环。")
-logger = logging.getLogger(__name__)
+        _UVLOOP_STARTUP_MESSAGE = "未找到 uvloop，将使用默认的 asyncio 事件循环。"
 
 
 # --- 环境变量 ---
@@ -78,6 +84,7 @@ class OdysseiaProtect(commands.Bot):
         resource_repo = ResourceRepository()
         user_repo = UserRepository()
         wishlist_repo = WishlistRepository()
+        self.rate_limit_service = RateLimitService()
         self.traceability_service = TraceabilityService.from_environment()
         self.object_store = R2ObjectStore()
         self.delivery_service = DeliveryService(
@@ -117,6 +124,7 @@ class OdysseiaProtect(commands.Bot):
         await init_db()
         logger.info("数据库初始化完成。")
 
+        await self.rate_limit_service.start()
         await self.delivery_service.start()
         await self.verification_service.start()
 
@@ -134,16 +142,20 @@ class OdysseiaProtect(commands.Bot):
 
         # 清理测试服务器的专属命令
         if TEST_GUILDS:
-            logger.info(f"检测到 {len(TEST_GUILDS)} 个测试服务器，正在清理专属命令以消除重复...")
+            logger.info(
+                f"检测到 {len(TEST_GUILDS)} 个测试服务器，正在清理专属命令以消除重复..."
+            )
             for guild_id in TEST_GUILDS:
                 try:
                     test_guild = discord.Object(id=guild_id)
                     self.tree.clear_commands(guild=test_guild)
                     await self.tree.sync(guild=test_guild)
-                    
+
                     logger.info(f"✅ 成功清理测试服务器 {guild_id} 的专属命令。")
                 except discord.Forbidden:
-                    logger.warning(f"❌ 无法操作测试服务器 {guild_id}：Bot不在该服务器或缺少权限。")
+                    logger.warning(
+                        f"❌ 无法操作测试服务器 {guild_id}：Bot不在该服务器或缺少权限。"
+                    )
                 except Exception as e:
                     logger.error(f"❌ 清理测试服务器 {guild_id} 时发生错误: {e}")
 
@@ -160,9 +172,16 @@ class OdysseiaProtect(commands.Bot):
         logger.info("Bot 已完全准备就绪。")
 
     async def close(self):
-        await self.verification_service.close()
-        await self.delivery_service.close()
-        await super().close()
+        """关闭业务服务、限流连接和 Discord 会话。"""
+        # 即使业务服务清理失败，也释放限流与 Discord 自有连接。
+        try:
+            await self.verification_service.close()
+            await self.delivery_service.close()
+        finally:
+            try:
+                await self.rate_limit_service.close()
+            finally:
+                await super().close()
 
 
 # --- 应用程序主入口 ---
@@ -188,12 +207,15 @@ async def main():
 # --- 运行主程序 ---
 if __name__ == "__main__":
     try:
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s - [%(levelname)s] - %(name)s: %(message)s",
-        )
+        setup_logging()
+        # 日志处理器就绪后输出事件循环初始化结果。
+        if _UVLOOP_STARTUP_MESSAGE:
+            logger.info(_UVLOOP_STARTUP_MESSAGE)
+
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("检测到键盘中断，程序已终止。")
     except Exception as e:
+        logging.basicConfig(level=logging.INFO)
         logger.critical(f"应用程序顶层出现未捕获的异常: {e}", exc_info=e)
+        raise SystemExit(1) from e

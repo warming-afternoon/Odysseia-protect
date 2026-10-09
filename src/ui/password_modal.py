@@ -1,12 +1,20 @@
 import asyncio
 import logging
-from src.enums.download_response_mode import DownloadResponseMode
-from src.ui.download_embed_builder import DownloadEmbedBuilder
 
 import discord
 
 from src.dto.resource_dto import ResourceDTO
+from src.enums.download_response_mode import DownloadResponseMode
+from src.exceptions.rate_limit_exceeded import RateLimitExceeded
+from src.qo.resource_delivery_qo import ResourceDeliveryQo
+from src.services.download_service import request_resource_delivery
+from src.ui.download_embed_builder import DownloadEmbedBuilder
 from src.ui.trace_consent_view import send_trace_consent
+from src.utils.download_guard import (
+    observe_download,
+    send_rate_limit_message,
+    update_operation,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -39,23 +47,32 @@ class PasswordModal(discord.ui.Modal, title="请输入下载密码"):
         )
         self.add_item(self.password_input)
 
+    @observe_download("password_submit")
     async def on_submit(self, interaction: discord.Interaction):
         """串行验证密码并防止恢复已经翻页的面板。"""
         # 已在翻页的面板及时提示，避免等待时交互过期。
         lock = getattr(self.panel_view, "state_lock", None)
         if lock is not None and lock.locked():
-            await interaction.response.send_message("ℹ️ 面板正在更新，请稍后重试。", ephemeral=True)
+            await interaction.response.send_message(
+                "ℹ️ 面板正在更新，请稍后重试。", ephemeral=True
+            )
             return
         async with lock or asyncio.Lock():
             if self.page_snapshot is not getattr(self.panel_view, "page_data", None):
-                await interaction.response.send_message("❌ 页面已变化，请重新选择资源。", ephemeral=True)
+                await interaction.response.send_message(
+                    "❌ 页面已变化，请重新选择资源。", ephemeral=True
+                )
                 return
             await self._handle_submit(interaction)
 
     async def _handle_submit(self, interaction: discord.Interaction):
         """验证密码并提供下载链接或溯源确认。"""
+        update_operation(
+            resource_id=self.resource.id, thread_id=self.resource.public_thread_id
+        )
         # 密码验证失败时保留原页与菜单。
         if self.password_input.value != self.resource.password:
+            update_operation(outcome="incorrect_password")
             embed = discord.Embed(
                 title="❌ 密码错误",
                 description="您输入的密码不正确，请重试。",
@@ -65,6 +82,7 @@ class PasswordModal(discord.ui.Modal, title="请输入下载密码"):
             return
 
         if self.resource.trace_enabled:
+            update_operation(outcome="awaiting_consent")
             await send_trace_consent(
                 interaction,
                 resource=self.resource,
@@ -83,7 +101,12 @@ class PasswordModal(discord.ui.Modal, title="请输入下载密码"):
             download_service = getattr(interaction.client, "download_service", None)
             if download_service is None:
                 raise RuntimeError("Bot 未配置下载服务。")
-            fresh_url = await download_service.fetch_fresh_url(self.resource)
+            delivery = await request_resource_delivery(
+                interaction.client,
+                self.resource,
+                qo=ResourceDeliveryQo(user_id=interaction.user.id),
+            )
+            fresh_url = delivery.url
 
             # 触发下载事件，供下载计数器监听
             interaction.client.dispatch("resource_downloaded", self.resource)
@@ -100,11 +123,18 @@ class PasswordModal(discord.ui.Modal, title="请输入下载密码"):
                 attachments=[],
             )
 
+        except RateLimitExceeded as error:
+            await send_rate_limit_message(
+                interaction,
+                error,
+                replace_response=self.response_mode
+                is DownloadResponseMode.CREATE_PRIVATE_PANEL,
+            )
         except Exception as e:
+            update_operation(outcome="failed")
             logger.error(f"为资源 {self.resource.id} 获取新下载链接失败", exc_info=e)
             error_message = (
-                "❌ 抱歉，获取下载链接时发生错误。"
-                "源文件可能已被删除或Bot无法访问。"
+                "❌ 抱歉，获取下载链接时发生错误。源文件可能已被删除或Bot无法访问。"
             )
             if self.response_mode is DownloadResponseMode.CREATE_PRIVATE_PANEL:
                 await interaction.edit_original_response(

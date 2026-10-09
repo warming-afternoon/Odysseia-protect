@@ -5,14 +5,15 @@ import logging
 
 import discord
 
-from src.enums.wishlist import WISHLIST_ADDED_MESSAGE
 from src.database.database import AsyncSessionLocal
+from src.enums.wishlist import WISHLIST_ADDED_MESSAGE
+from src.ui.wishlist_consent_view import WishlistConsentView
 from src.ui.wishlist_ui import (
-    WishlistConsentView,
     build_wishlist_consent_embed,
 )
 
 logger = logging.getLogger(__name__)
+
 
 class AddToWishlistButton(discord.ui.Button):
     """将当前已授权资源加入心愿单。"""
@@ -31,7 +32,9 @@ class AddToWishlistButton(discord.ui.Button):
         if self.view is None:
             return
         if self.view.state_lock.locked():
-            await interaction.response.send_message("ℹ️ 面板正在更新，请稍后重试。", ephemeral=True)
+            await interaction.response.send_message(
+                "ℹ️ 面板正在更新，请稍后重试。", ephemeral=True
+            )
             return
         async with self.view.state_lock:
             await self._handle(interaction)
@@ -41,7 +44,10 @@ class AddToWishlistButton(discord.ui.Button):
         from src.ui.resource_select_view import ResourceSelectView
 
         # 校验选择状态后调用心愿单服务。
-        if not isinstance(self.view, ResourceSelectView) or self not in self.view.children:
+        if (
+            not isinstance(self.view, ResourceSelectView)
+            or self not in self.view.children
+        ):
             return
         view = self.view
         resource_id = view.selected_resource_id

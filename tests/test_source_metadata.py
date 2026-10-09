@@ -5,8 +5,8 @@ import pytest
 
 from src.cogs.event_handler_cog import EventHandlerCog
 from src.database.repositories.thread import ThreadRepository
-from src.database.schemas import ThreadCreate
 from src.enums import SourceStatus
+from src.qo.thread_create import ThreadCreate
 from src.scripts import backfill_thread_sources
 
 

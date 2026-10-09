@@ -1,5 +1,7 @@
 from src.models import User
-from ..schemas import UserCreate, UserUpdate
+from src.qo.user_create import UserCreate
+from src.qo.user_update import UserUpdate
+
 from .base import BaseRepository
 
 

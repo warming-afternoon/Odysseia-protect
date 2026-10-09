@@ -1,11 +1,13 @@
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# Import your project's models and repositories
-from src.enums import UploadMode
 from src.database.repositories.resource import ResourceRepository
 from src.database.repositories.thread import ThreadRepository
-from src.database.schemas import ResourceCreate, ThreadCreate
+
+# Import your project's models and repositories
+from src.enums import UploadMode
+from src.qo.resource_create import ResourceCreate
+from src.qo.thread_create import ThreadCreate
 
 
 @pytest.mark.asyncio

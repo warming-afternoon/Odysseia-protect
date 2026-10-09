@@ -10,6 +10,7 @@ services:
     command: ["python", "main.py"]
     volumes:
       - ./data:/app/data
+      - ./logs:/app/logs
     environment:
       REDIS_URL: ${REDIS_URL:-redis://odysseia-protect-redis:6379/0}
     depends_on:

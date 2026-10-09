@@ -1,23 +1,24 @@
 from src.ui.download_panel import build_download_panel
+
 """
 集成测试，验证多个服务之间的协作。
 """
 
-import pytest
-import discord
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import discord
+import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database.repositories.resource import ResourceRepository
 from src.database.repositories.thread import ThreadRepository
 from src.database.repositories.user import UserRepository
-from src.database.schemas import ThreadCreate, UserCreate
-from src.enums import UploadMode
-from src.enums import SourceStatus
-from src.services.upload_service import UploadService
+from src.enums import SourceStatus, UploadMode
+from src.qo.thread_create import ThreadCreate
+from src.qo.user_create import UserCreate
 from src.services.download_service import DownloadService
 from src.services.management_service import ManagementService
+from src.services.upload_service import UploadService
 from src.utils.auth import assert_thread_author
 
 
@@ -121,7 +122,8 @@ class TestIntegration:
 
         # 6. 测试下载请求
         download_result = await build_download_panel(
-            download_service, session=db_session,
+            download_service,
+            session=db_session,
             source=mock_interaction,
         )
         assert "embed" in download_result
@@ -174,9 +176,7 @@ class TestIntegration:
         assert result == "✅ 上传成功"
         interaction.channel.send.assert_not_called()
 
-    async def test_non_author_is_rejected_before_upload(
-        self, db_session: AsyncSession
-    ):
+    async def test_non_author_is_rejected_before_upload(self, db_session: AsyncSession):
         """测试上传入口在调用服务前拒绝非帖子作者。"""
         thread_repo = ThreadRepository()
         # 创建帖子记录，作者为 111

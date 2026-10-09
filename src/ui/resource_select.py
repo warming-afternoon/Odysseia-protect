@@ -12,13 +12,22 @@ import discord
 from src.database.database import AsyncSessionLocal
 from src.dto.download_resource_option_dto import DownloadResourceOptionDTO
 from src.enums import UploadMode
-from src.qo.resource_selection_qo import ResourceSelectionQo
-from src.ui.download_embed_builder import DownloadEmbedBuilder
 from src.enums.download_response_mode import DownloadResponseMode
+from src.exceptions.rate_limit_exceeded import RateLimitExceeded
+from src.qo.resource_delivery_qo import ResourceDeliveryQo
+from src.qo.resource_selection_qo import ResourceSelectionQo
+from src.services.download_service import request_resource_delivery
+from src.ui.download_embed_builder import DownloadEmbedBuilder
 from src.ui.password_modal import PasswordModal
 from src.ui.trace_consent_view import send_trace_consent
+from src.utils.download_guard import (
+    observe_download,
+    send_rate_limit_message,
+    update_operation,
+)
 
 logger = logging.getLogger(__name__)
+
 
 class ResourceSelect(discord.ui.Select):
     """当前资源页的版本选择下拉菜单。"""
@@ -83,6 +92,7 @@ class ResourceSelect(discord.ui.Select):
             disabled=not options or options[0].value == "disabled",
         )
 
+    @observe_download("resource_select")
     async def callback(self, interaction: discord.Interaction):
         """串行处理版本选择，防止与同一面板的翻页冲突。"""
         if self.view is None:
@@ -92,7 +102,9 @@ class ResourceSelect(discord.ui.Select):
             )
             return
         if self.view.state_lock.locked():
-            await interaction.response.send_message("ℹ️ 面板正在更新，请稍后重试。", ephemeral=True)
+            await interaction.response.send_message(
+                "ℹ️ 面板正在更新，请稍后重试。", ephemeral=True
+            )
             return
         async with self.view.state_lock:
             await self._handle_selection(interaction)
@@ -107,25 +119,37 @@ class ResourceSelect(discord.ui.Select):
             )
             return
         selected_resource_id = int(self.values[0])
-        if selected_resource_id not in {int(option.value) for option in self.options if option.value != "disabled"}:
-            await interaction.response.send_message("❌ 所选资源不在当前页。", ephemeral=True)
+        update_operation(
+            resource_id=selected_resource_id, thread_id=self.public_thread_id
+        )
+        if selected_resource_id not in {
+            int(option.value) for option in self.options if option.value != "disabled"
+        }:
+            await interaction.response.send_message(
+                "❌ 所选资源不在当前页。", ephemeral=True
+            )
             return
         download_service = interaction.client.download_service
         # ORM 详情在服务内部转换，回调仅接收独立的数据对象。
         try:
             async with AsyncSessionLocal() as session:
                 resource_dto = await download_service.get_selected_resource(
-                    session, ResourceSelectionQo(
-                        public_thread_id=self.public_thread_id, resource_id=selected_resource_id,
+                    session,
+                    ResourceSelectionQo(
+                        public_thread_id=self.public_thread_id,
+                        resource_id=selected_resource_id,
                     ),
                 )
         except Exception:
             logger.exception("读取下载资源失败")
-            await interaction.response.send_message("❌ 读取资源失败，请稍后重试。", ephemeral=True)
+            await interaction.response.send_message(
+                "❌ 读取资源失败，请稍后重试。", ephemeral=True
+            )
             return
         if resource_dto is None:
             await interaction.response.send_message(
-                "错误：找不到所选的资源，它可能已被删除。", ephemeral=True,
+                "错误：找不到所选的资源，它可能已被删除。",
+                ephemeral=True,
             )
             return
         if hasattr(self.view, "clear_authorized_selection"):
@@ -164,10 +188,12 @@ class ResourceSelect(discord.ui.Select):
                 panel_view=panel_view,
                 response_mode=self.response_mode,
             )
+            update_operation(outcome="awaiting_password")
             await interaction.response.send_modal(modal)
             return
 
         if resource_dto.trace_enabled:
+            update_operation(outcome="awaiting_consent")
             await send_trace_consent(
                 interaction,
                 resource=resource_dto,
@@ -186,7 +212,12 @@ class ResourceSelect(discord.ui.Select):
             download_service = getattr(interaction.client, "download_service", None)
             if download_service is None:
                 raise RuntimeError("Bot 未配置下载服务。")
-            fresh_url = await download_service.fetch_fresh_url(resource_dto)
+            delivery = await request_resource_delivery(
+                interaction.client,
+                resource_dto,
+                qo=ResourceDeliveryQo(user_id=interaction.user.id),
+            )
+            fresh_url = delivery.url
 
             # 触发下载事件，供其他组件监听（如下载计数器）
             interaction.client.dispatch("resource_downloaded", resource_dto)
@@ -205,13 +236,20 @@ class ResourceSelect(discord.ui.Select):
                 attachments=[],
             )
 
+        except RateLimitExceeded as error:
+            await send_rate_limit_message(
+                interaction,
+                error,
+                replace_response=self.response_mode
+                is DownloadResponseMode.CREATE_PRIVATE_PANEL,
+            )
         except Exception as e:
+            update_operation(outcome="failed")
             logger.error(
                 f"为资源 {selected_resource_id} 获取新下载链接失败", exc_info=e
             )
             error_message = (
-                "❌ 抱歉，获取下载链接时发生错误。"
-                "源文件可能已被删除或Bot无法访问。"
+                "❌ 抱歉，获取下载链接时发生错误。源文件可能已被删除或Bot无法访问。"
             )
             if self.response_mode is DownloadResponseMode.CREATE_PRIVATE_PANEL:
                 await interaction.edit_original_response(
