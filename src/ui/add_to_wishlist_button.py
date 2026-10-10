@@ -91,7 +91,7 @@ class AddToWishlistButton(discord.ui.Button):
                 user_id=interaction.user.id,
                 resource_id=resource_id,
                 panel_view=view,
-                panel_message=interaction.message,
+                panel_interaction=interaction,
             )
             await interaction.followup.send(
                 embed=build_wishlist_consent_embed(),

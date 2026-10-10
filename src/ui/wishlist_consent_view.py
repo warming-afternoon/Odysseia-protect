@@ -23,7 +23,7 @@ class WishlistConsentView(discord.ui.View):
         user_id: int,
         resource_id: int,
         panel_view,
-        panel_message: discord.Message | None,
+        panel_interaction: discord.Interaction,
     ):
         """保存交互所需的用户、页面和服务依赖。"""
         # 保存交互所需的用户、页面和服务依赖。
@@ -32,7 +32,7 @@ class WishlistConsentView(discord.ui.View):
         self.user_id = user_id
         self.resource_id = resource_id
         self.panel_view = panel_view
-        self.panel_message = panel_message
+        self.panel_interaction = panel_interaction
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         """限制个人面板只能由所属用户操作。"""
@@ -86,13 +86,24 @@ class WishlistConsentView(discord.ui.View):
                 getattr(self.panel_view, "selected_resource_id", None)
                 == self.resource_id
             )
-            if selection_is_still_current:
+            if selection_is_still_current and not self.panel_view.is_finished():
                 self.panel_view.set_wishlist_state(True)
-            if selection_is_still_current and self.panel_message is not None:
-                try:
-                    await self.panel_message.edit(view=self.panel_view)
-                except discord.HTTPException:
-                    logger.warning("无法刷新原下载面板的心愿单按钮状态")
+                message_id = getattr(self.panel_interaction.message, "id", None)
+                if self.panel_interaction.is_expired():
+                    logger.warning(
+                        "无法刷新原下载面板的心愿单按钮状态：交互已过期 message_id=%s",
+                        message_id,
+                    )
+                else:
+                    try:
+                        await self.panel_interaction.edit_original_response(view=self.panel_view)
+                    except (discord.HTTPException, OSError) as error:
+                        logger.warning(
+                            "无法刷新原下载面板的心愿单按钮状态：status=%s code=%s message_id=%s",
+                            getattr(error, "status", None),
+                            getattr(error, "code", None),
+                            message_id,
+                        )
 
         await interaction.edit_original_response(
             content=WISHLIST_ADDED_MESSAGE,

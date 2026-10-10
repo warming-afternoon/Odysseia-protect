@@ -25,7 +25,9 @@ def make_page(resources, *, total=None, page=1):
         total=count,
         page=page,
         max_page=max(1, (count + 24) // 25),
-        items=tuple(DownloadResourceOptionDTO.model_validate(r) for r in ordered),
+        items=tuple(DownloadResourceOptionDTO.model_validate(
+            {**vars(r), "has_password": bool(r.password)}
+        ) for r in ordered),
     )
 
 
@@ -173,8 +175,11 @@ def make_interaction(download_service: MagicMock) -> SimpleNamespace:
     client.wishlist_service = MagicMock()
     client.wishlist_service.is_wishlisted = AsyncMock(return_value=False)
     client.dispatch = MagicMock()
-    return SimpleNamespace(
+    interaction = SimpleNamespace(
+        id=456,
+        is_expired=MagicMock(return_value=False),
         response=SimpleNamespace(
+            is_done=MagicMock(return_value=False),
             defer=AsyncMock(),
             send_message=AsyncMock(),
             send_modal=AsyncMock(),
@@ -185,6 +190,12 @@ def make_interaction(download_service: MagicMock) -> SimpleNamespace:
         user=SimpleNamespace(id=123),
         message=None,
     )
+    def mark_responded(*args, **kwargs):
+        interaction.response.is_done.return_value = True
+    interaction.response.defer.side_effect = mark_responded
+    interaction.response.send_message.side_effect = mark_responded
+    interaction.response.send_modal.side_effect = mark_responded
+    return interaction
 
 
 def make_session_context() -> MagicMock:
@@ -229,11 +240,14 @@ async def test_resource_select_replaces_result_embed_in_private_panel():
         select._values = ["1"]
         with patch.object(DownloadEmbedBuilder, "build_download_embed", embed_builder):
             await select.callback(interaction)
+        interaction.response.is_done.return_value = False
         select._values = ["2"]
         with patch.object(DownloadEmbedBuilder, "build_download_embed", embed_builder):
             await select.callback(interaction)
 
-    assert interaction.response.defer.await_args_list == [call(), call()]
+    assert interaction.response.defer.await_args_list == [
+        call(ephemeral=True, thinking=False), call(ephemeral=True, thinking=False)
+    ]
     assert interaction.edit_original_response.await_args_list == [
         call(
             embeds=[first_download_embed, resource_list_embed],
@@ -303,7 +317,7 @@ async def test_public_download_gateway_creates_private_complete_panel():
 
 
 @pytest.mark.asyncio
-async def test_public_password_selection_creates_private_complete_panel():
+async def test_public_password_selection_creates_private_complete_panel(monkeypatch):
     resource = make_resource(1, version="v1", password="secret")
     resource_list_embed = discord.Embed(title="📄 版本选择")
     result_embed = discord.Embed(title="📥 角色卡下载")
@@ -343,6 +357,7 @@ async def test_public_password_selection_creates_private_complete_panel():
     )
     embed_builder = MagicMock(return_value=result_embed)
     modal_interaction = make_interaction(download_service)
+    monkeypatch.setattr("src.ui.password_modal.AsyncSessionLocal", make_session_context)
 
     with patch.object(DownloadEmbedBuilder, "build_download_embed", embed_builder):
         await modal.on_submit(modal_interaction)
@@ -458,7 +473,7 @@ async def test_resource_select_failure_keeps_panel_and_sends_private_error():
     ):
         await select.callback(interaction)
 
-    interaction.response.defer.assert_awaited_once_with()
+    interaction.response.defer.assert_awaited_once_with(ephemeral=True, thinking=False)
     interaction.edit_original_response.assert_not_awaited()
     interaction.followup.send.assert_awaited_once()
     assert interaction.followup.send.await_args.kwargs["ephemeral"] is True
@@ -492,7 +507,7 @@ async def test_expired_resource_select_points_to_available_download_entries():
 
 
 @pytest.mark.asyncio
-async def test_password_modal_updates_original_private_panel():
+async def test_password_modal_updates_original_private_panel(monkeypatch):
     resource = ResourceDTO(
         id=1,
         filename="card.png",
@@ -505,7 +520,8 @@ async def test_password_modal_updates_original_private_panel():
     result_embed = discord.Embed(title="📥 角色卡下载")
     panel_view = discord.ui.View()
     modal = PasswordModal(
-        resource,
+        resource_id=resource.id,
+        public_thread_id=resource.public_thread_id,
         resource_list_embed=resource_list_embed,
         panel_view=panel_view,
     )
@@ -517,11 +533,13 @@ async def test_password_modal_updates_original_private_panel():
     )
     embed_builder = MagicMock(return_value=result_embed)
     interaction = make_interaction(download_service)
+    download_service.get_selected_resource = AsyncMock(return_value=resource)
+    monkeypatch.setattr("src.ui.password_modal.AsyncSessionLocal", make_session_context)
 
     with patch.object(DownloadEmbedBuilder, "build_download_embed", embed_builder):
         await modal.on_submit(interaction)
 
-    interaction.response.defer.assert_awaited_once_with()
+    interaction.response.defer.assert_awaited_once_with(ephemeral=True, thinking=False)
     interaction.edit_original_response.assert_awaited_once_with(
         embeds=[result_embed, resource_list_embed],
         view=panel_view,
@@ -535,7 +553,7 @@ async def test_password_modal_updates_original_private_panel():
 
 
 @pytest.mark.asyncio
-async def test_password_modal_rejects_wrong_password_privately():
+async def test_password_modal_rejects_wrong_password_privately(monkeypatch):
     resource = ResourceDTO(
         id=1,
         filename="card.png",
@@ -545,17 +563,20 @@ async def test_password_modal_rejects_wrong_password_privately():
         public_thread_id=3,
     )
     modal = PasswordModal(
-        resource,
+        resource_id=resource.id,
+        public_thread_id=resource.public_thread_id,
         resource_list_embed=discord.Embed(title="📄 版本选择"),
         panel_view=discord.ui.View(),
     )
     modal.password_input._value = "wrong"
     interaction = make_interaction(MagicMock())
+    interaction.client.download_service.get_selected_resource = AsyncMock(return_value=resource)
+    monkeypatch.setattr("src.ui.password_modal.AsyncSessionLocal", make_session_context)
 
     await modal.on_submit(interaction)
 
-    interaction.response.send_message.assert_awaited_once()
-    assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
-    interaction.response.defer.assert_not_awaited()
+    interaction.response.send_message.assert_not_awaited()
+    interaction.response.defer.assert_awaited_once_with(ephemeral=True, thinking=False)
     interaction.edit_original_response.assert_not_awaited()
-    interaction.followup.send.assert_not_awaited()
+    interaction.followup.send.assert_awaited_once()
+    assert interaction.followup.send.await_args.kwargs["ephemeral"] is True

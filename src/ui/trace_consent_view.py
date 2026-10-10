@@ -9,6 +9,7 @@ import discord
 
 from src.config import TRACE_DOWNLOAD_CONSENT_TEXT
 from src.dto.resource_dto import ResourceDTO
+from src.enums.download_response_mode import DownloadResponseMode
 from src.exceptions.rate_limit_exceeded import RateLimitExceeded
 from src.qo.resource_delivery_qo import ResourceDeliveryQo
 from src.services.download_service import request_resource_delivery
@@ -135,13 +136,14 @@ async def send_trace_consent(
     resource: ResourceDTO,
     resource_list_embed: discord.Embed,
     panel_view: discord.ui.View,
+    response_mode: DownloadResponseMode = DownloadResponseMode.EDIT_PRIVATE_PANEL,
 ) -> None:
     """发送私密告知并复制当前页，隔离后续下载面板状态。"""
     # 溯源下载回复属于另一条消息，使用独立视图避免状态互相覆盖。
     if hasattr(panel_view, "create_private_view"):
         panel_view = panel_view.create_private_view(user_id=interaction.user.id)
         resource_list_embed = panel_view.resource_list_embed
-    await interaction.response.send_message(
+    response = dict(
         embed=build_trace_consent_embed(resource),
         view=TraceConsentView(
             resource=resource,
@@ -149,5 +151,10 @@ async def send_trace_consent(
             panel_view=panel_view,
             user_id=interaction.user.id,
         ),
-        ephemeral=True,
     )
+    if not interaction.response.is_done():
+        await interaction.response.send_message(**response, ephemeral=True)
+    elif response_mode is DownloadResponseMode.CREATE_PRIVATE_PANEL:
+        await interaction.edit_original_response(content=None, **response)
+    else:
+        await interaction.followup.send(**response, ephemeral=True)

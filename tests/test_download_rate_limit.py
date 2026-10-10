@@ -35,7 +35,6 @@ def make_bot_interaction(*, bot=None):
         return_value="https://example.com/private-link"
     )
     interaction = make_interaction(download_service)
-    interaction.response.is_done = MagicMock(return_value=True)
     interaction.guild = SimpleNamespace(id=400)
     interaction.channel = SimpleNamespace(id=300)
     if bot is not None:
@@ -104,8 +103,9 @@ async def test_selection_denial_does_not_fetch_or_dispatch_and_logs_once(
 
 
 @pytest.mark.asyncio
-async def test_password_selection_wrong_password_and_success_charge_only_once(caplog):
+async def test_password_selection_wrong_password_and_success_charge_only_once(caplog, monkeypatch):
     """选择和错误密码不扣额度，正确密码才在取链前扣一次。"""
+    monkeypatch.setattr("src.ui.password_modal.AsyncSessionLocal", make_session_context)
     interaction = make_bot_interaction()
     view = make_private_view(
         [make_resource(1, version="v1", password="do-not-log-password")]
@@ -163,7 +163,7 @@ async def test_trace_consent_charges_only_on_agreement_and_blocks_repeated_deliv
         "src.ui.resource_select.AsyncSessionLocal", return_value=make_session_context()
     ):
         await select.callback(interaction)
-    consent = interaction.response.send_message.await_args.kwargs["view"]
+    consent = interaction.followup.send.await_args.kwargs["view"]
     limiter = interaction.client.rate_limit_service
     assert (await limiter.check(RateLimitQo(123, charge=False))).daily_count == 0
     agreed = make_bot_interaction(bot=interaction.client)

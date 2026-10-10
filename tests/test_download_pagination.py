@@ -36,7 +36,7 @@ def page_data(total, page=1):
         items=tuple(DownloadResourceOptionDTO(
             id=i, version_info=f"v{i}", filename=f"card-{i}.png",
             source_message_id=i + 100, upload_mode=UploadMode.SECURE,
-            created_at=datetime(2026, 10, 1),
+            created_at=datetime(2026, 10, 1), has_password=False,
         ) for i in range(end, max(0, end - 25), -1)),
     )
 
@@ -333,14 +333,15 @@ async def test_password_opened_before_paging_cannot_restore_previous_page():
         id=26, filename="password.png", version_info="v26", source_message_id=126,
         public_thread_id=300, password="secret",
     )
-    modal = PasswordModal(resource, resource_list_embed=view.resource_list_embed, panel_view=view)
+    modal = PasswordModal(resource_id=resource.id, public_thread_id=resource.public_thread_id,
+                          resource_list_embed=view.resource_list_embed, panel_view=view)
     modal.password_input._value = "secret"
     view.page_data = page_data(26, 2)
     view.render_page()
     interaction = make_interaction(MagicMock())
     await modal.on_submit(interaction)
-    interaction.response.send_message.assert_awaited_once_with(
-        "❌ 页面已变化，请重新选择资源。", ephemeral=True,
+    interaction.followup.send.assert_awaited_once_with(
+        content="❌ 页面已变化，请重新选择资源。", embed=None, ephemeral=True,
     )
     interaction.edit_original_response.assert_not_awaited()
     assert view.page_data.page == 2
