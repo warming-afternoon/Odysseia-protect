@@ -146,7 +146,7 @@ class UploadService(BaseService):
         # --- 隐私协议检查 ---
         user = await self._get_or_create_user(session, user_id=author.id)
         if not user.has_agreed_to_privacy_policy:
-            logger.info(f"用户 {author.id} 尚未同意隐私协议，将向其显示协议。")
+            # logger.info(f"用户 {author.id} 尚未同意隐私协议，将向其显示协议。")
             await session.commit()
             embed = discord.Embed(
                 title="📤 请阅读并同意资源上传与数据存储协议",
@@ -241,9 +241,9 @@ class UploadService(BaseService):
 
         author = interaction.user
         log_identifier = file.filename if file else message_link
-        logger.info(
-            f"用户 {author} ({author.id}) 在频道 {interaction.channel.id} 提交上传表单: {log_identifier}, 模式: {mode}"
-        )
+        # logger.info(
+        #     f"用户 {author} ({author.id}) 在频道 {interaction.channel.id} 提交上传表单: {log_identifier}, 模式: {mode}"
+        # )
 
         try:
             # --- 权限检查（从 handle_upload 移至此处） ---
@@ -468,7 +468,7 @@ class UploadService(BaseService):
             )
             await self.resource_repo.create(session, obj_in=resource_data)
 
-            logger.info(f"受保护文件上传成功: {file.filename} -> {warehouse_thread.id}")
+            logger.debug(f"受保护文件上传成功: {file.filename} -> {warehouse_thread.id}")
             trace_note = "，并已开启动态溯源" if trace_enabled else ""
             return (
                 f"✅ 受保护文件上传成功！文件 `{file.filename}` 已被安全存储"
