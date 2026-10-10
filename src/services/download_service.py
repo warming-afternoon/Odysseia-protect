@@ -49,7 +49,19 @@ class DownloadService(BaseService):
         return DownloadPageDTO(
             public_thread_id=qo.public_thread_id,
             guild_id=thread.guild_id,
-            items=tuple(DownloadResourceOptionDTO.model_validate(r) for r in resources),
+            items=tuple(
+                DownloadResourceOptionDTO(
+                    id=r.id,
+                    filename=r.filename,
+                    version_info=r.version_info,
+                    created_at=r.created_at,
+                    upload_mode=r.upload_mode,
+                    source_message_id=r.source_message_id,
+                    has_password=bool(r.password),
+                    trace_enabled=r.trace_enabled,
+                )
+                for r in resources
+            ),
             page=page,
             total=total,
             max_page=max_page,

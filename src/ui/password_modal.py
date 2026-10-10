@@ -3,18 +3,21 @@ import logging
 
 import discord
 
-from src.dto.resource_dto import ResourceDTO
+from src.database.database import AsyncSessionLocal
 from src.enums.download_response_mode import DownloadResponseMode
 from src.exceptions.rate_limit_exceeded import RateLimitExceeded
 from src.qo.resource_delivery_qo import ResourceDeliveryQo
+from src.qo.resource_selection_qo import ResourceSelectionQo
 from src.services.download_service import request_resource_delivery
 from src.ui.download_embed_builder import DownloadEmbedBuilder
 from src.ui.trace_consent_view import send_trace_consent
 from src.utils.download_guard import (
     observe_download,
+    send_download_error,
     send_rate_limit_message,
     update_operation,
 )
+from src.utils.safe_defer import safe_defer
 
 logger = logging.getLogger(__name__)
 
@@ -24,15 +27,17 @@ class PasswordModal(discord.ui.Modal, title="请输入下载密码"):
 
     def __init__(
         self,
-        resource: ResourceDTO,
         *,
+        resource_id: int,
+        public_thread_id: int,
         resource_list_embed: discord.Embed,
         panel_view: discord.ui.View,
         response_mode: DownloadResponseMode = DownloadResponseMode.EDIT_PRIVATE_PANEL,
     ):
         """记录待验证资源与面板页快照。"""
         super().__init__(timeout=300)  # 5分钟超时
-        self.resource = resource
+        self.resource_id = resource_id
+        self.public_thread_id = public_thread_id
         self.resource_list_embed = resource_list_embed
         self.panel_view = panel_view
         self.page_snapshot = getattr(panel_view, "page_data", None)
@@ -50,52 +55,72 @@ class PasswordModal(discord.ui.Modal, title="请输入下载密码"):
     @observe_download("password_submit")
     async def on_submit(self, interaction: discord.Interaction):
         """串行验证密码并防止恢复已经翻页的面板。"""
-        # 已在翻页的面板及时提示，避免等待时交互过期。
+        update_operation(resource_id=self.resource_id, thread_id=self.public_thread_id)
+        is_public = self.response_mode is DownloadResponseMode.CREATE_PRIVATE_PANEL
+        await safe_defer(interaction, thinking=is_public)
         lock = getattr(self.panel_view, "state_lock", None)
         if lock is not None and lock.locked():
-            await interaction.response.send_message(
-                "ℹ️ 面板正在更新，请稍后重试。", ephemeral=True
+            await send_download_error(
+                interaction, "ℹ️ 面板正在更新，请稍后重试。", replace_response=is_public
             )
             return
         async with lock or asyncio.Lock():
+            if self.panel_view.is_finished():
+                await send_download_error(
+                    interaction, "❌ 下载面板状态已失效，请重新选择资源。",
+                    replace_response=is_public,
+                )
+                return
             if self.page_snapshot is not getattr(self.panel_view, "page_data", None):
-                await interaction.response.send_message(
-                    "❌ 页面已变化，请重新选择资源。", ephemeral=True
+                await send_download_error(
+                    interaction, "❌ 页面已变化，请重新选择资源。", replace_response=is_public
                 )
                 return
             await self._handle_submit(interaction)
 
     async def _handle_submit(self, interaction: discord.Interaction):
-        """验证密码并提供下载链接或溯源确认。"""
-        update_operation(
-            resource_id=self.resource.id, thread_id=self.resource.public_thread_id
-        )
-        # 密码验证失败时保留原页与菜单。
-        if self.password_input.value != self.resource.password:
+        """查询最新资源和密码，通过后提供下载链接或溯源确认。"""
+        is_public = self.response_mode is DownloadResponseMode.CREATE_PRIVATE_PANEL
+        try:
+            async with AsyncSessionLocal() as session:
+                resource = await interaction.client.download_service.get_selected_resource(
+                    session,
+                    ResourceSelectionQo(
+                        public_thread_id=self.public_thread_id, resource_id=self.resource_id
+                    ),
+                )
+        except Exception:
+            update_operation(outcome="failed")
+            logger.exception("读取密码验证资源失败：resource=%s", self.resource_id)
+            await send_download_error(
+                interaction, "❌ 读取资源失败，请稍后重试。", replace_response=is_public
+            )
+            return
+        if resource is None:
+            await send_download_error(
+                interaction, "❌ 资源已不存在，请刷新下载面板后重新选择。",
+                replace_response=is_public,
+            )
+            return
+        if resource.password and self.password_input.value != resource.password:
             update_operation(outcome="incorrect_password")
             embed = discord.Embed(
                 title="❌ 密码错误",
                 description="您输入的密码不正确，请重试。",
                 color=discord.Color.red(),
             )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await send_download_error(interaction, embed=embed, replace_response=is_public)
             return
-
-        if self.resource.trace_enabled:
+        if resource.trace_enabled:
             update_operation(outcome="awaiting_consent")
             await send_trace_consent(
                 interaction,
-                resource=self.resource,
+                resource=resource,
                 resource_list_embed=self.resource_list_embed,
                 panel_view=self.panel_view,
+                response_mode=self.response_mode,
             )
             return
-
-        # 公开防呆面板不能被原地更新；密码通过后创建新的私密响应。
-        if self.response_mode is DownloadResponseMode.CREATE_PRIVATE_PANEL:
-            await interaction.response.defer(ephemeral=True, thinking=True)
-        else:
-            await interaction.response.defer()
 
         try:
             download_service = getattr(interaction.client, "download_service", None)
@@ -103,19 +128,19 @@ class PasswordModal(discord.ui.Modal, title="请输入下载密码"):
                 raise RuntimeError("Bot 未配置下载服务。")
             delivery = await request_resource_delivery(
                 interaction.client,
-                self.resource,
+                resource,
                 qo=ResourceDeliveryQo(user_id=interaction.user.id),
             )
             fresh_url = delivery.url
 
             # 触发下载事件，供下载计数器监听
-            interaction.client.dispatch("resource_downloaded", self.resource)
+            interaction.client.dispatch("resource_downloaded", resource)
 
-            embed = DownloadEmbedBuilder.build_download_embed(self.resource, fresh_url)
+            embed = DownloadEmbedBuilder.build_download_embed(resource, fresh_url)
             if hasattr(self.panel_view, "authorize_selection"):
                 await self.panel_view.authorize_selection(
                     interaction,
-                    resource_id=self.resource.id,
+                    resource_id=self.resource_id,
                 )
             await interaction.edit_original_response(
                 embeds=[embed, self.resource_list_embed],
@@ -132,7 +157,7 @@ class PasswordModal(discord.ui.Modal, title="请输入下载密码"):
             )
         except Exception as e:
             update_operation(outcome="failed")
-            logger.error(f"为资源 {self.resource.id} 获取新下载链接失败", exc_info=e)
+            logger.error(f"为资源 {self.resource_id} 获取新下载链接失败", exc_info=e)
             error_message = (
                 "❌ 抱歉，获取下载链接时发生错误。源文件可能已被删除或Bot无法访问。"
             )

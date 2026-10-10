@@ -56,6 +56,20 @@ async def send_rate_limit_message(
         await interaction.response.send_message(error.message, ephemeral=True)
 
 
+async def send_download_error(
+    interaction, content=None, *, embed=None, replace_response=False
+):
+    """延迟应答后提示错误：公开入口替换私密响应，个人面板保留原消息。"""
+    if replace_response:
+        await interaction.edit_original_response(
+            content=content,
+            embeds=[embed] if embed is not None else [],
+            view=None,
+        )
+    else:
+        await interaction.followup.send(content=content, embed=embed, ephemeral=True)
+
+
 def _id(value):
     """仅接受真实整数 ID，避免记录任意对象。"""
     # Discord 身份字段只记录整数值。
