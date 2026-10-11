@@ -13,6 +13,15 @@ from src.services.rate_limit_service import rate_limiter_for
 logger = logging.getLogger(__name__)
 
 
+# 保留原因码供检索，同时为观察日志补充中文说明。
+_REASON_TRANSLATIONS = {
+    "minute_rate_limit": "达到分钟下载次数上限",
+    "daily_rate_limit": "达到每日下载次数上限",
+    "daily_watch": "每日下载次数超过观察阈值",
+    "active_watch": "处于观察期",
+}
+
+
 _current: ContextVar[DownloadOperationDTO | None] = ContextVar(
     "download_operation", default=None
 )
@@ -123,10 +132,15 @@ def observe_download(name: str):
                         )
                     if result.watched:
                         reasons = ",".join(result.reasons) or "active_watch"
+                        reasons_zh = ",".join(
+                            _REASON_TRANSLATIONS.get(reason, reason)
+                            for reason in (result.reasons or ("active_watch",))
+                        )
                         method = logger.warning if result.reasons else logger.info
                         method(
                             "WATCH: user_id=%s guild_id=%s thread_id=%s resource_id=%s "
-                            "page=%s operation=%s reason=%s minute_count=%s/%s "
+                            "page=%s operation=%s reason=%s reason_zh=%s "
+                            "minute_count=%s/%s "
                             "daily_count=%s/%s retry_after=%ss outcome=%s mode=%s",
                             operation.user_id,
                             operation.guild_id,
@@ -135,6 +149,7 @@ def observe_download(name: str):
                             operation.page,
                             operation.operation,
                             reasons,
+                            reasons_zh,
                             result.minute_count,
                             result.minute_limit,
                             result.daily_count,
