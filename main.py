@@ -76,7 +76,7 @@ class OdysseiaProtect(commands.Bot):
         intents.message_content = True  # 允许读取消息内容
 
         super().__init__(
-            command_prefix="!",  # 虽然主要用斜杠命令，但保留前缀
+            command_prefix="!",  # 保留 Bot 初始化参数，文本命令由 process_commands 禁用
             intents=intents,
         )
 
@@ -116,6 +116,11 @@ class OdysseiaProtect(commands.Bot):
     #       self.reaction_wall_service = ReactionWallService(
     #           self, resource_repo, thread_repo, user_repo
     #       )
+
+    async def process_commands(self, message: discord.Message) -> None:
+        """禁用全部文本命令，避免其他机器人的命令触发未找到命令错误。"""
+        # 仅跳过文本命令处理，斜杠命令和消息监听仍正常运行。
+        return
 
     async def setup_hook(self):
         """在 Bot 登录后执行异步初始化。"""
