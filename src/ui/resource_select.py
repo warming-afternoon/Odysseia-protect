@@ -254,7 +254,14 @@ class ResourceSelect(discord.ui.Select):
         except Exception as e:
             update_operation(outcome="failed")
             logger.error(
-                f"为资源 {selected_resource_id} 获取新下载链接失败", exc_info=e
+                "为资源 %s 获取新下载链接失败：user_id=%s thread_id=%s "
+                "source_message_id=%s guild_id=%s",
+                selected_resource_id,
+                interaction.user.id,
+                self.public_thread_id,
+                resource_dto.source_message_id,
+                resource_dto.guild_id or interaction.guild_id,
+                exc_info=e,
             )
             error_message = (
                 "❌ 抱歉，获取下载链接时发生错误。源文件可能已被删除或Bot无法访问。"

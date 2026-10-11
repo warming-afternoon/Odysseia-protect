@@ -274,6 +274,8 @@ class ManagementService(BaseService):
 
         # 删除资源前记录源位置，供源消息删除后的缓存清理使用。
         source_message_id = resource_to_delete.source_message_id
+        public_thread_id = resource_to_delete.thread.public_thread_id
+        guild_id = resource_to_delete.thread.guild_id or interaction.guild_id
         source_channel_id = (
             resource_to_delete.thread.warehouse_thread_id or resource_to_delete.thread.public_thread_id
             if resource_to_delete.upload_mode == UploadMode.SECURE
@@ -295,7 +297,10 @@ class ManagementService(BaseService):
                 )
                 await source_message.delete()
                 logger.info(
-                    f"成功从 Discord 删除受保护文件源消息 {resource_to_delete.source_message_id}"
+                    "成功从 Discord 删除受保护文件源消息 %s：thread_id=%s guild_id=%s",
+                    source_message_id,
+                    public_thread_id,
+                    guild_id,
                 )
             except (
                 discord.NotFound,
@@ -304,12 +309,19 @@ class ManagementService(BaseService):
                 ValueError,
             ) as e:
                 logger.warning(
-                    f"无法删除受保护文件源消息 {resource_to_delete.source_message_id}。"
-                    f"它可能已被手动删除或Bot权限不足。错误: {e}"
+                    "无法删除受保护文件源消息 %s：thread_id=%s guild_id=%s。"
+                    "它可能已被手动删除或Bot权限不足。错误: %s",
+                    source_message_id,
+                    public_thread_id,
+                    guild_id,
+                    e,
                 )
             except Exception as e:
                 logger.error(
-                    f"删除受保护文件源消息 {resource_to_delete.source_message_id} 时发生未知错误。",
+                    "删除受保护文件源消息 %s 时发生未知错误：thread_id=%s guild_id=%s。",
+                    source_message_id,
+                    public_thread_id,
+                    guild_id,
                     exc_info=e,
                 )
             finally:

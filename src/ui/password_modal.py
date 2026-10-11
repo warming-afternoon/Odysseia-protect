@@ -157,7 +157,16 @@ class PasswordModal(discord.ui.Modal, title="请输入下载密码"):
             )
         except Exception as e:
             update_operation(outcome="failed")
-            logger.error(f"为资源 {self.resource_id} 获取新下载链接失败", exc_info=e)
+            logger.error(
+                "为资源 %s 获取新下载链接失败：user_id=%s thread_id=%s "
+                "source_message_id=%s guild_id=%s",
+                self.resource_id,
+                interaction.user.id,
+                self.public_thread_id,
+                resource.source_message_id,
+                resource.guild_id or interaction.guild_id,
+                exc_info=e,
+            )
             error_message = (
                 "❌ 抱歉，获取下载链接时发生错误。源文件可能已被删除或Bot无法访问。"
             )
