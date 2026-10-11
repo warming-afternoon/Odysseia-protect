@@ -24,6 +24,7 @@ async def test_replace_preserves_attachment_title(db_session, title, expected, t
     resource = Resource(
         thread_id=thread.id, version_info="v1", upload_mode=UploadMode.SECURE,
         source_message_id=40, filename="old.png", trace_enabled=trace_enabled,
+        author_note="换源保留这段说明", password="legacy-password", download_count=7,
     )
     db_session.add(resource)
     await db_session.commit()
@@ -56,6 +57,8 @@ async def test_replace_preserves_attachment_title(db_session, title, expected, t
     await db_session.refresh(resource)
     assert resource.filename == expected
     assert resource.source_message_id == 50
+    assert resource.author_note == "换源保留这段说明"
+    assert resource.password == "legacy-password" and resource.download_count == 7
     assert warehouse.send.await_args.kwargs["file"].filename == expected
     if trace_enabled:
         bot.traceability_service.validate_character_card.assert_called_once_with(expected, b"test")

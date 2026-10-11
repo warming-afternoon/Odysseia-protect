@@ -3,7 +3,6 @@
 上传功能的 UI 组件 (View 和 Modal)
 """
 
-import logging
 from typing import Optional, TYPE_CHECKING, Union, List
 
 import discord
@@ -11,15 +10,15 @@ import discord
 from src.database.database import AsyncSessionLocal
 from src.database.repositories.user import UserRepository
 from src.utils.auth import assert_thread_manager, send_private_error
+from src.ui.normal_upload_modal import NormalUploadModal
+from src.ui.secure_upload_modal import SecureUploadModal
+from src.ui.upload_modal import UploadModal
 
 if TYPE_CHECKING:
     from src.services.upload_service import UploadService
 
-logger = logging.getLogger(__name__)
-
-
-def _trace_enabled(value: str) -> bool:
-    return value.strip().casefold() in {"开启", "是", "yes", "true", "1"}
+# 保留旧模块的公开导出，表单实现位于各自对应模块。
+__all__ = ["PrivacyPolicyView", "UploadModal", "NormalUploadModal", "SecureUploadModal"]
 
 
 class PrivacyPolicyView(discord.ui.View):
@@ -108,126 +107,3 @@ class PrivacyPolicyView(discord.ui.View):
             if isinstance(item, discord.ui.Button):
                 item.disabled = True
         await interaction.edit_original_response(view=self)
-
-
-class UploadModal(discord.ui.Modal):
-    """上传表单绑定发起人；提交权限由服务层实时校验。"""
-
-    async def check_actor(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self.user_id:
-            await send_private_error(interaction, "此上传表单仅供发起人使用。")
-            return False
-        return True
-
-
-class NormalUploadModal(UploadModal, title="上传普通文件 - 填写信息"):
-    """用于普通文件上传的模态框，只包含版本信息。"""
-
-    def __init__(self, service: "UploadService", message_link: Optional[str], user_id: int):
-        super().__init__()
-        self.user_id = user_id
-        self.service = service
-        self.message_link = message_link
-
-        self.version_info_input = discord.ui.TextInput(
-            label="版本信息",
-            placeholder="例如：v1.0.0, 2024-01-01 Final",
-            style=discord.TextStyle.short,
-            required=True,
-            max_length=100,
-        )
-        self.add_item(self.version_info_input)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        """当用户提交模态框时，调用服务层完成上传流程。"""
-        if not await self.check_actor(interaction):
-            return
-        await interaction.response.send_message(
-            "⏳ 正在处理您的上传，请稍候...", ephemeral=True
-        )
-        async with AsyncSessionLocal() as session:
-            result_message = await self.service.handle_upload_submission(
-                session,
-                interaction=interaction,
-                mode="normal",
-                message_link=self.message_link,
-                version_info=self.version_info_input.value,
-                password=None,  # 普通文件没有密码
-            )
-        await interaction.edit_original_response(content=result_message)
-
-
-class SecureUploadModal(UploadModal, title="上传受保护文件 - 填写信息"):
-    """用于受保护文件上传的模态框，包含版本和密码信息。"""
-
-    def __init__(
-        self,
-        service: "UploadService",
-        files: Union[discord.Attachment, List[discord.Attachment]],
-        user_id: int,
-        source_message: Optional[discord.Message] = None,
-    ):
-        super().__init__()
-        self.user_id = user_id
-        self.service = service
-        self.files = files
-        self.source_message = source_message
-
-        self.version_info_input = discord.ui.TextInput(
-            label="版本信息",
-            placeholder="例如：v1.0.0, 2024-01-01 Final",
-            style=discord.TextStyle.short,
-            required=True,
-            max_length=100,
-        )
-        self.password_input = discord.ui.TextInput(
-            label="下载密码 (留空则无密码)",
-            placeholder="例如：123456",
-            style=discord.TextStyle.short,
-            required=False,
-            max_length=50,
-        )
-        self.trace_input = discord.ui.TextInput(
-            label="动态溯源（输入“开启”以启用，留空则关闭）",
-            placeholder="仅支持不超过 25 MB 的 PNG 角色卡",
-            style=discord.TextStyle.short,
-            required=False,
-            max_length=10,
-        )
-        self.add_item(self.version_info_input)
-        self.add_item(self.password_input)
-        self.add_item(self.trace_input)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        """当用户提交模态框时，调用服务层完成上传流程。"""
-        if not await self.check_actor(interaction):
-            return
-        await interaction.response.send_message(
-            "⏳ 正在处理您的上传，请稍候...", ephemeral=True
-        )
-        async with AsyncSessionLocal() as session:
-            if isinstance(self.files, list):
-                # 来自上下文菜单的多文件上传
-                result_message = (
-                    await self.service.handle_secure_upload_submission_from_message(
-                        session,
-                        interaction=interaction,
-                        attachments=self.files,
-                        version_info=self.version_info_input.value,
-                        password=self.password_input.value or None,
-                        trace_enabled=_trace_enabled(self.trace_input.value),
-                        source_message=self.source_message,
-                    )
-                )
-            else:
-                # 来自 /上传 命令的单文件上传
-                result_message = await self.service.handle_upload_submission(
-                    session,
-                    interaction=interaction,
-                    mode="secure",
-                    file=self.files,
-                    version_info=self.version_info_input.value,
-                    password=self.password_input.value or None,
-                    trace_enabled=_trace_enabled(self.trace_input.value),
-                )
-        await interaction.edit_original_response(content=result_message)

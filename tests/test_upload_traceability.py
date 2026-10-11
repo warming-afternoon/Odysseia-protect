@@ -40,7 +40,7 @@ async def test_secure_upload_validates_and_persists_trace_opt_in():
         interaction=interaction,
         file=attachment,
         version_info="v1",
-        password=None,
+        author_note=None,
         trace_enabled=True,
     )
 
@@ -87,7 +87,7 @@ async def test_trace_upload_rejects_oversize_metadata_before_reading():
         mode="secure",
         file=attachment,
         version_info="v1",
-        password=None,
+        author_note=None,
         trace_enabled=True,
     )
 
@@ -130,7 +130,7 @@ async def test_trace_upload_rechecks_actual_bytes_after_reading():
         mode="secure",
         file=attachment,
         version_info="v1",
-        password=None,
+        author_note=None,
         trace_enabled=True,
     )
 
@@ -165,7 +165,7 @@ async def test_trace_batch_rejects_all_before_reading_when_one_file_is_oversize(
         interaction=interaction,
         attachments=[small, large],
         version_info="v1",
-        password=None,
+        author_note=None,
         trace_enabled=True,
     )
 
@@ -191,7 +191,7 @@ async def test_oversize_secure_upload_still_works_when_trace_is_disabled():
         interaction=interaction,
         file=attachment,
         version_info="v1",
-        password=None,
+        author_note=None,
         trace_enabled=False,
     )
 

@@ -51,7 +51,7 @@ class WishlistItem(Base):
     resource: Mapped["Resource"] = relationship(
         "Resource", back_populates="wishlist_items"
     )
-    """被收藏的具体资源版本，下载时仍遵循该版本的密码和溯源设置。"""
+    """被收藏的具体资源版本，下载时仍遵循该版本的溯源设置和交付额度。"""
 
     def __repr__(self) -> str:
         return (

@@ -1,17 +1,18 @@
-"""密码交互首次应答与私密心愿单面板刷新回归。"""
+"""无密码下载的首次应答与私密心愿单面板刷新回归。"""
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import discord
 import pytest
-from pydantic import ValidationError
 
-from src.dto.download_resource_option_dto import DownloadResourceOptionDTO
+from src.dto.rate_limit_config import RateLimitConfig
+from src.services.rate_limit_service import RateLimitService
 from src.enums.wishlist import WISHLIST_ADDED_MESSAGE
 from src.models.resource import Resource
 from src.qo.download_page_qo import DownloadPageQo
 from src.qo.rate_limit_qo import RateLimitQo
+from src.qo.resource_selection_qo import ResourceSelectionQo
 from src.utils.safe_defer import safe_defer
 from tests.test_download_pagination import seed, service
 from tests.test_download_rate_limit import make_bot_interaction, make_dto
@@ -21,187 +22,138 @@ from tests.test_download_ui import (
 
 
 @pytest.mark.asyncio
-async def test_list_derives_password_flags_without_retaining_passwords(db_session):
+async def test_download_dtos_do_not_retain_historical_passwords(db_session):
+    """历史密码不进入资源列表与下载详情的数据契约。"""
     await seed(db_session, 3)
     for resource_id, password in ((1, "do-not-retain"), (2, None), (3, "")):
         resource = await db_session.get(Resource, resource_id)
         resource.password = password
     await db_session.flush()
     page = await service().get_page(db_session, DownloadPageQo(public_thread_id=300))
-    assert {item.id: item.has_password for item in page.items} == {1: True, 2: False, 3: False}
     assert "do-not-retain" not in page.model_dump_json()
-    assert all(not hasattr(item, "password") for item in page.items)
-    fields = page.items[0].model_dump()
-    del fields["has_password"]
-    with pytest.raises(ValidationError):
-        DownloadResourceOptionDTO.model_validate(fields)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("public", [False, True])
-async def test_password_menu_opens_modal_before_any_database_work(public):
-    view = (make_public_view if public else make_private_view)(
-        [make_resource(1, version="v1", password="old-secret")]
+    assert all(not hasattr(item, "password") and not hasattr(item, "has_password") for item in page.items)
+    detail = await service().get_selected_resource(
+        db_session, ResourceSelectionQo(public_thread_id=300, resource_id=1),
     )
-    select = view.children[0]
-    select._values = ["1"]
-    interaction = make_bot_interaction()
-    interaction.client.download_service.get_selected_resource = AsyncMock()
-    with patch("src.ui.resource_select.AsyncSessionLocal") as sessions:
-        await select.callback(interaction)
-    sessions.assert_not_called()
-    interaction.client.download_service.get_selected_resource.assert_not_awaited()
-    interaction.response.send_modal.assert_awaited_once()
-    interaction.response.defer.assert_not_awaited()
-    modal = interaction.response.send_modal.await_args.args[0]
-    assert modal.resource_id == 1 and modal.public_thread_id == 300
-    assert not hasattr(modal, "resource")
-    assert "old-secret" not in repr(select.password_flags)
+    assert "password" not in detail.model_dump()
+    assert (await db_session.get(Resource, 1)).password == "do-not-retain"
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("public", [False, True])
-@pytest.mark.parametrize("current_password, entered, allowed", [
-    ("new-secret", "old-secret", False),
-    ("new-secret", "new-secret", True),
-    (None, "old-secret", True),
-    ("", "anything", True),
+@pytest.mark.parametrize("list_password,current_password", [
+    ("old-secret", "new-secret"), ("old-secret", None), (None, "new-secret"), ("", ""),
 ])
-async def test_modal_defers_before_query_and_uses_current_password(
-    public, current_password, entered, allowed, monkeypatch
+async def test_selection_defers_and_delivers_regardless_of_password_changes(
+    db_session, public, list_password, current_password, monkeypatch, caplog,
 ):
+    """数据库密码变化不阻止旧列表下载，实际交付只扣一次额度。"""
+    import logging
+
+    await seed(db_session, 1)
+    resource = await db_session.get(Resource, 1)
+    resource.password = current_password
+    resource.author_note = "**最新备注**\n下载面板读取最新详情"
+    await db_session.flush()
     view = (make_public_view if public else make_private_view)(
-        [make_resource(1, version="v1", password="old-secret")]
+        [make_resource(1, version="v1", password=list_password)]
     )
     select = view.children[0]
     select._values = ["1"]
-    opening = make_bot_interaction()
-    await select.callback(opening)
-    modal = opening.response.send_modal.await_args.args[0]
-    modal.password_input._value = entered
-    submitted = make_bot_interaction(bot=opening.client)
-    current = make_dto(password=current_password)
-    current.source_message_id = 999
-    context = make_session_context()
-
-    async def enter_session():
-        assert submitted.response.is_done()
-        return MagicMock()
-
-    context.__aenter__.side_effect = enter_session
-    monkeypatch.setattr("src.ui.password_modal.AsyncSessionLocal", lambda: context)
-    monkeypatch.setattr("src.ui.resource_select_view.AsyncSessionLocal", make_session_context)
-    submitted.client.download_service.get_selected_resource = AsyncMock(return_value=current)
-    await modal.on_submit(submitted)
-    submitted.response.defer.assert_awaited_once_with(ephemeral=True, thinking=public)
-    query = submitted.client.download_service.get_selected_resource.await_args.args[1]
-    assert query.public_thread_id == 300 and query.resource_id == 1
-    submitted.response.send_message.assert_not_awaited()
-    if allowed:
-        submitted.client.download_service.fetch_fresh_url.assert_awaited_once_with(current)
-        submitted.client.dispatch.assert_called_once_with("resource_downloaded", current)
-        assert modal.panel_view.selected_resource_id == 1
-    else:
-        submitted.client.download_service.fetch_fresh_url.assert_not_awaited()
-        submitted.client.dispatch.assert_not_called()
-        response = submitted.edit_original_response if public else submitted.followup.send
-        kwargs = response.await_args.kwargs
-        embed = kwargs["embeds"][0] if public else kwargs["embed"]
-        assert embed.title == "❌ 密码错误"
-        if not public:
-            submitted.edit_original_response.assert_not_awaited()
-    budget = await submitted.client.rate_limit_service.check(RateLimitQo(123, charge=False))
-    assert budget.daily_count == int(allowed)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("public", [False, True])
-async def test_new_password_on_stale_unprotected_list_blocks_delivery(public, monkeypatch):
-    view = (make_public_view if public else make_private_view)([make_resource(1, version="v1")])
-    select = view.children[0]
-    select._values = ["1"]
     interaction = make_bot_interaction()
+    interaction.client.rate_limit_service = RateLimitService(
+        RateLimitConfig(daily_watch_threshold=1), redis_url="",
+    )
+    await interaction.client.rate_limit_service.check(RateLimitQo(123))
+    context = make_session_context()
+    context.__aenter__.return_value = db_session
 
-    async def selected(*args):
+    async def selected(session, qo):
         assert interaction.response.is_done()
-        return make_dto(password="new-secret")
+        return await service().get_selected_resource(session, qo)
 
     interaction.client.download_service.get_selected_resource = AsyncMock(side_effect=selected)
-    monkeypatch.setattr("src.ui.resource_select.AsyncSessionLocal", make_session_context)
+    monkeypatch.setattr("src.ui.resource_select.AsyncSessionLocal", lambda: context)
+    monkeypatch.setattr("src.ui.resource_select_view.AsyncSessionLocal", make_session_context)
+    caplog.set_level(logging.INFO)
     await select.callback(interaction)
+    interaction.response.defer.assert_awaited_once_with(ephemeral=True, thinking=public)
     interaction.response.send_modal.assert_not_awaited()
-    interaction.client.download_service.fetch_fresh_url.assert_not_awaited()
-    interaction.client.dispatch.assert_not_called()
+    interaction.client.download_service.fetch_fresh_url.assert_awaited_once()
+    detail = interaction.client.download_service.fetch_fresh_url.await_args.args[0]
+    interaction.client.dispatch.assert_called_once_with("resource_downloaded", detail)
+    panel = interaction.edit_original_response.await_args.kwargs["view"]
+    assert panel.selected_resource_id == 1
+    result_embed = interaction.edit_original_response.await_args.kwargs["embeds"][0]
+    assert resource.author_note in result_embed.description
+    assert (await interaction.client.rate_limit_service.check(RateLimitQo(123, charge=False))).daily_count == 2
+    logs = [record.getMessage() for record in caplog.records if record.getMessage().startswith("WATCH:")]
+    assert len(logs) == 1 and "outcome=success" in logs[0]
+    assert "secret" not in logs[0]
+    assert resource.password == current_password
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("public", [False, True])
+async def test_historical_password_trace_selection_still_requires_consent(public, monkeypatch):
+    """历史有密码的溯源资源直接进入同意流程，等待及拒绝不扣额度。"""
+    view = (make_public_view if public else make_private_view)(
+        [make_resource(1, version="v1", password="secret")]
+    )
+    view.children[0]._values = ["1"]
+    interaction = make_bot_interaction()
+    interaction.client.download_service.get_selected_resource = AsyncMock(
+        return_value=make_dto(trace_enabled=True)
+    )
+    monkeypatch.setattr("src.ui.resource_select.AsyncSessionLocal", make_session_context)
+    await view.children[0].callback(interaction)
+    interaction.response.defer.assert_awaited_once_with(ephemeral=True, thinking=public)
+    interaction.response.send_modal.assert_not_awaited()
     response = interaction.edit_original_response if public else interaction.followup.send
-    assert "密码设置已变化" in response.await_args.kwargs["content"]
+    consent = response.await_args.kwargs["view"]
+    assert consent.resource.trace_enabled
+    interaction.client.download_service.fetch_delivery.assert_not_called()
+    refusal = make_bot_interaction(bot=interaction.client)
+    refusal.response.edit_message = AsyncMock()
+    await consent.disagree.callback(refusal)
+    interaction.client.download_service.fetch_delivery.assert_not_called()
     assert (await interaction.client.rate_limit_service.check(RateLimitQo(123, charge=False))).daily_count == 0
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("public", [False, True])
-async def test_password_trace_confirmation_after_defer_does_not_charge(public, monkeypatch):
-    view = (make_public_view if public else make_private_view)(
-        [make_resource(1, version="v1", password="secret")]
-    )
-    select = view.children[0]
-    select._values = ["1"]
-    opening = make_bot_interaction()
-    await select.callback(opening)
-    modal = opening.response.send_modal.await_args.args[0]
-    modal.password_input._value = "secret"
-    submitted = make_bot_interaction(bot=opening.client)
-    submitted.client.download_service.get_selected_resource = AsyncMock(
-        return_value=make_dto(password="secret", trace_enabled=True)
-    )
-    monkeypatch.setattr("src.ui.password_modal.AsyncSessionLocal", make_session_context)
-    await modal.on_submit(submitted)
-    submitted.response.defer.assert_awaited_once_with(ephemeral=True, thinking=public)
-    submitted.response.send_message.assert_not_awaited()
-    response = submitted.edit_original_response if public else submitted.followup.send
-    consent = response.await_args.kwargs["view"]
-    assert consent.resource.trace_enabled
-    assert consent.panel_view is not modal.panel_view
-    submitted.client.download_service.fetch_delivery.assert_not_called()
-    assert (await submitted.client.rate_limit_service.check(RateLimitQo(123, charge=False))).daily_count == 0
-    if public:
-        submitted.followup.send.assert_not_awaited()
-    else:
-        submitted.edit_original_response.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("public", [False, True])
 @pytest.mark.parametrize("state", ["finished", "busy", "deleted", "query_error"])
-async def test_modal_failure_preserves_panel_and_never_delivers(public, state, monkeypatch):
+async def test_selection_failure_never_delivers_or_charges(public, state, monkeypatch):
+    """移除密码分支后仍拒绝失效面板、已删除资源与查询故障。"""
     view = (make_public_view if public else make_private_view)(
         [make_resource(1, version="v1", password="secret")]
     )
     view.children[0]._values = ["1"]
-    opening = make_bot_interaction()
-    await view.children[0].callback(opening)
-    modal = opening.response.send_modal.await_args.args[0]
-    submitted = make_bot_interaction(bot=opening.client)
+    interaction = make_bot_interaction()
     query = AsyncMock(return_value=None)
-    submitted.client.download_service.get_selected_resource = query
-    monkeypatch.setattr("src.ui.password_modal.AsyncSessionLocal", make_session_context)
+    interaction.client.download_service.get_selected_resource = query
+    monkeypatch.setattr("src.ui.resource_select.AsyncSessionLocal", make_session_context)
     if state == "finished":
-        modal.panel_view.stop()
+        view.stop()
     elif state == "busy":
-        await modal.panel_view.state_lock.acquire()
+        await view.state_lock.acquire()
     elif state == "query_error":
         query.side_effect = RuntimeError("database unavailable")
     try:
-        await modal.on_submit(submitted)
+        await view.children[0].callback(interaction)
     finally:
         if state == "busy":
-            modal.panel_view.state_lock.release()
-    assert submitted.response.is_done()
-    submitted.client.download_service.fetch_fresh_url.assert_not_awaited()
-    response = submitted.edit_original_response if public else submitted.followup.send
-    response.assert_awaited_once()
+            view.state_lock.release()
+    interaction.client.download_service.fetch_fresh_url.assert_not_awaited()
+    interaction.client.dispatch.assert_not_called()
+    interaction.response.send_modal.assert_not_awaited()
     if state in {"finished", "busy"}:
         query.assert_not_awaited()
-    assert (await submitted.client.rate_limit_service.check(RateLimitQo(123, charge=False))).daily_count == 0
+        interaction.response.send_message.assert_awaited_once()
+    else:
+        response = interaction.edit_original_response if public else interaction.followup.send
+        response.assert_awaited_once()
+    assert (await interaction.client.rate_limit_service.check(RateLimitQo(123, charge=False))).daily_count == 0
 
 
 @pytest.mark.asyncio

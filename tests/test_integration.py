@@ -95,7 +95,7 @@ class TestIntegration:
                 interaction=mock_interaction,
                 mode="normal",
                 version_info="1.0",
-                password=None,
+                author_note=None,
                 file=None,
                 message_link="https://discord.com/channels/111/12345/67890",
             )
@@ -170,7 +170,7 @@ class TestIntegration:
             interaction=interaction,
             attachments=[MagicMock(spec=discord.Attachment)],
             version_info="v1",
-            password=None,
+            author_note=None,
         )
 
         assert result == "✅ 上传成功"

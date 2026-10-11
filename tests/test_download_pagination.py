@@ -20,7 +20,6 @@ from src.qo.resource_selection_qo import ResourceSelectionQo
 from src.services.delivery_service import DeliveryResult
 from src.services.download_service import DownloadService
 from src.ui.download_page_jump_modal import DownloadPageJumpModal
-from src.ui.password_modal import PasswordModal
 from src.ui.public_resource_select_view import PublicResourceSelectView
 from src.ui.resource_select_view import ResourceSelectView
 from src.ui.trace_consent_view import send_trace_consent
@@ -36,7 +35,7 @@ def page_data(total, page=1):
         items=tuple(DownloadResourceOptionDTO(
             id=i, version_info=f"v{i}", filename=f"card-{i}.png",
             source_message_id=i + 100, upload_mode=UploadMode.SECURE,
-            created_at=datetime(2026, 10, 1), has_password=False,
+            created_at=datetime(2026, 10, 1),
         ) for i in range(end, max(0, end - 25), -1)),
     )
 
@@ -324,27 +323,6 @@ async def test_trace_confirmation_retains_page_in_independent_view():
     panel = confirm.edit_original_response.await_args.kwargs["view"]
     assert panel.page_data.page == 2 and panel.selected_resource_id == 1
     assert view.selected_resource_id is None
-
-
-@pytest.mark.asyncio
-async def test_password_opened_before_paging_cannot_restore_previous_page():
-    view = ResourceSelectView(page_data(26))
-    resource = ResourceDTO(
-        id=26, filename="password.png", version_info="v26", source_message_id=126,
-        public_thread_id=300, password="secret",
-    )
-    modal = PasswordModal(resource_id=resource.id, public_thread_id=resource.public_thread_id,
-                          resource_list_embed=view.resource_list_embed, panel_view=view)
-    modal.password_input._value = "secret"
-    view.page_data = page_data(26, 2)
-    view.render_page()
-    interaction = make_interaction(MagicMock())
-    await modal.on_submit(interaction)
-    interaction.followup.send.assert_awaited_once_with(
-        content="❌ 页面已变化，请重新选择资源。", embed=None, ephemeral=True,
-    )
-    interaction.edit_original_response.assert_not_awaited()
-    assert view.page_data.page == 2
 
 
 @pytest.mark.asyncio

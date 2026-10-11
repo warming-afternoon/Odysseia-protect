@@ -50,12 +50,16 @@ class DownloadEmbedBuilder:
     @staticmethod
     def build_download_embed(resource: ResourceDTO, fresh_url: str) -> discord.Embed:
         """构建同时适合直接下载和复制到 SillyTavern 的结果页。"""
+        # 作者备注位于资源信息之后，空白备注不占用面板空间。
+        note = (resource.author_note or "").strip()
+        note_text = f"📝 **作者备注**\n{note}\n\n" if note else ""
         # 在结果页同时提供下载链接和可复制的导入地址。
         embed = discord.Embed(
             title="📥 角色卡下载",
             description=(
                 f"**版本：** {resource.version_info}\n"
                 f"**文件：** `{resource.filename or '未命名文件'}`\n\n"
+                f"{note_text}"
                 "📋 **SillyTavern 快速导入 URL**\n"
                 f"```\n{fresh_url}\n```\n"
                 f"[🌐 打开下载链接]({fresh_url})\n\n"
@@ -76,11 +80,15 @@ class DownloadEmbedBuilder:
         # 根据交付是否有公开有效链接选择展示内容。
         if delivery.url:
             return DownloadEmbedBuilder.build_download_embed(resource, delivery.url)
+        # 附件交付复用同一备注展示顺序。
+        note = (resource.author_note or "").strip()
+        note_text = f"📝 **作者备注**\n{note}\n\n" if note else ""
         return discord.Embed(
             title="📥 个性化角色卡下载",
             description=(
                 f"**版本：** {resource.version_info}\n"
                 f"**文件：** `{delivery.filename}`\n\n"
+                f"{note_text}"
                 "R2 当前不可用，已改用本条私密消息的附件交付。\n"
                 "该附件仅包含为当前用户生成的溯源凭证。"
             ),

@@ -153,7 +153,7 @@ class WishlistService(BaseService):
             id=resource.id,
             filename=resource.filename,
             version_info=resource.version_info,
-            password=resource.password,
+            author_note=resource.author_note,
             source_message_id=resource.source_message_id,
             warehouse_thread_id=resource.thread.warehouse_thread_id,
             public_thread_id=resource.thread.public_thread_id,

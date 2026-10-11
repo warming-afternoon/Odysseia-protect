@@ -57,7 +57,6 @@ class DownloadService(BaseService):
                     created_at=r.created_at,
                     upload_mode=r.upload_mode,
                     source_message_id=r.source_message_id,
-                    has_password=bool(r.password),
                     trace_enabled=r.trace_enabled,
                 )
                 for r in resources
@@ -84,7 +83,7 @@ class DownloadService(BaseService):
             id=resource.id,
             filename=resource.filename,
             version_info=resource.version_info,
-            password=resource.password,
+            author_note=resource.author_note,
             source_message_id=resource.source_message_id,
             warehouse_thread_id=thread.warehouse_thread_id,
             public_thread_id=thread.public_thread_id,
