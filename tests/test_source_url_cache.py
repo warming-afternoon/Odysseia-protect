@@ -253,7 +253,7 @@ async def test_resource_deletion_actively_invalidates_without_gateway_event(mode
         channel.fetch_message.side_effect = error_type(SimpleNamespace(status=404, reason='gone'), 'gone')
     bot = SimpleNamespace(source_url_cache_service=cache, fetch_channel=AsyncMock(return_value=channel))
     resource = SimpleNamespace(upload_mode=mode, source_message_id=2,
-                               thread=SimpleNamespace(warehouse_thread_id=20, public_thread_id=10))
+                               thread=SimpleNamespace(warehouse_thread_id=20, public_thread_id=10, guild_id=1))
     repo = SimpleNamespace(get_with_thread=AsyncMock(return_value=resource), remove=AsyncMock(return_value=resource))
     service = ManagementService(bot, repo, None, None)
     with patch('src.services.management_service.require_thread_manager', AsyncMock()):
@@ -303,7 +303,7 @@ async def test_delete_failure_after_source_removal_still_invalidates():
     message = SimpleNamespace(delete=AsyncMock())
     channel.fetch_message = AsyncMock(return_value=message)
     resource = SimpleNamespace(upload_mode=UploadMode.SECURE, source_message_id=2,
-                               thread=SimpleNamespace(warehouse_thread_id=20, public_thread_id=10))
+                               thread=SimpleNamespace(warehouse_thread_id=20, public_thread_id=10, guild_id=1))
     repo = SimpleNamespace(get_with_thread=AsyncMock(return_value=resource),
                            remove=AsyncMock(side_effect=RuntimeError('DB failure')))
     bot = SimpleNamespace(source_url_cache_service=cache, fetch_channel=AsyncMock(return_value=channel))

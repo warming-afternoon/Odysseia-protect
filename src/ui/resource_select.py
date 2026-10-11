@@ -18,7 +18,6 @@ from src.qo.resource_delivery_qo import ResourceDeliveryQo
 from src.qo.resource_selection_qo import ResourceSelectionQo
 from src.services.download_service import request_resource_delivery
 from src.ui.download_embed_builder import DownloadEmbedBuilder
-from src.ui.password_modal import PasswordModal
 from src.ui.trace_consent_view import send_trace_consent
 from src.utils.download_guard import (
     observe_download,
@@ -48,7 +47,6 @@ class ResourceSelect(discord.ui.Select):
         self.resource_list_embed = resource_list_embed
         self.response_mode = response_mode
         self.private_view_factory = private_view_factory
-        self.password_flags = {resource.id: resource.has_password for resource in resources}
         options = []
         # 服务已完成数据库分页，菜单仅展示本页资源。
         for resource in resources:
@@ -160,20 +158,7 @@ class ResourceSelect(discord.ui.Select):
                 return
             panel_view = self.private_view_factory(user_id=interaction.user.id)
 
-        # 如果资源有密码，立即弹出模态框
-        if self.password_flags[selected_resource_id]:
-            modal = PasswordModal(
-                resource_id=selected_resource_id,
-                public_thread_id=self.public_thread_id,
-                resource_list_embed=resource_list_embed,
-                panel_view=panel_view,
-                response_mode=self.response_mode,
-            )
-            update_operation(outcome="awaiting_password")
-            await interaction.response.send_modal(modal)
-            return
-
-        # 无密码路径也必须在数据库查询前应答。
+        # 所有资源统一在数据库查询前应答。
         is_public = self.response_mode is DownloadResponseMode.CREATE_PRIVATE_PANEL
         await safe_defer(interaction, thinking=is_public)
         download_service = interaction.client.download_service
@@ -196,13 +181,6 @@ class ResourceSelect(discord.ui.Select):
         if resource_dto is None:
             await send_download_error(
                 interaction, "错误：找不到所选的资源，它可能已被删除。", replace_response=is_public
-            )
-            return
-        if resource_dto.password:
-            # 列表标记可能过时，不能绕过新设置的密码。
-            await send_download_error(
-                interaction, "❌ 资源密码设置已变化，请刷新下载面板后重新选择。",
-                replace_response=is_public,
             )
             return
         if resource_dto.trace_enabled:

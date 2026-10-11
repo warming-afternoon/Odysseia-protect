@@ -29,8 +29,5 @@ class DownloadResourceOptionDTO(BaseModel):
     source_message_id: int
     """资源源消息的 Discord ID，普通资源据此构建公开消息跳转链接。"""
 
-    has_password: bool
-    """列表构建时是否设置密码；选择时仅据此决定是否立即弹窗。"""
-
     trace_enabled: bool = False
     """是否开启动态溯源；开启时显示溯源标识，下载前进入告知与确认流程。"""

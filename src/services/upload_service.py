@@ -10,13 +10,15 @@ from typing import Any, Optional, Union
 import discord
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.config import TRACE_MAX_SOURCE_BYTES, UPLOAD_PRIVACY_POLICY_TEXT
+from src.config import AUTHOR_NOTE_MAX_LENGTH, TRACE_MAX_SOURCE_BYTES, UPLOAD_PRIVACY_POLICY_TEXT
 from src.enums import SourceStatus, UploadMode
 from src.qo.resource_create import ResourceCreate
 from src.qo.thread_create import ThreadCreate
 from src.qo.user_create import UserCreate
 from src.services.base import BaseService
-from src.ui.upload_ui import NormalUploadModal, PrivacyPolicyView, SecureUploadModal
+from src.ui.normal_upload_modal import NormalUploadModal
+from src.ui.secure_upload_modal import SecureUploadModal
+from src.ui.upload_ui import PrivacyPolicyView
 from src.utils.auth import require_thread_manager
 from src.utils.discord_utils import parse_message_link
 
@@ -222,7 +224,7 @@ class UploadService(BaseService):
         interaction: discord.Interaction,
         mode: str,
         version_info: str,
-        password: Optional[str],
+        author_note: Optional[str] = None,
         trace_enabled: bool = False,
         file: Optional[discord.Attachment] = None,
         message_link: Optional[str] = None,
@@ -232,6 +234,11 @@ class UploadService(BaseService):
             interaction.channel, (discord.TextChannel, discord.Thread)
         ):
             return "错误：此命令似乎在无效的频道上下文中被调用。"
+
+        # 在任何文件或数据库写入之前验证用户备注长度。
+        if author_note is not None and len(author_note) > AUTHOR_NOTE_MAX_LENGTH:
+            return f"❌ 作者备注最多允许 {AUTHOR_NOTE_MAX_LENGTH} 个字符。"
+        author_note = (author_note or "").strip() or None
 
         if mode == "secure" and trace_enabled and file is not None:
             try:
@@ -265,7 +272,7 @@ class UploadService(BaseService):
                     interaction=interaction,
                     file=file,
                     version_info=version_info,
-                    password=password,
+                    author_note=author_note,
                     trace_enabled=trace_enabled,
                 )
             else:
@@ -276,7 +283,7 @@ class UploadService(BaseService):
                     interaction=interaction,
                     message_link=message_link,
                     version_info=version_info,
-                    password=password,
+                    author_note=author_note,
                 )
             if result.startswith("❌"):
                 await session.rollback()
@@ -423,7 +430,7 @@ class UploadService(BaseService):
         interaction: discord.Interaction,
         file: discord.Attachment,
         version_info: Optional[str],
-        password: Optional[str],
+        author_note: Optional[str],
         trace_enabled: bool,
     ) -> str:
         """处理受保护文件的上传逻辑，文件将被上传到私密的论坛帖子中。"""
@@ -463,7 +470,7 @@ class UploadService(BaseService):
                 filename=file.filename,
                 version_info=version_info or "未提供",
                 source_message_id=message.id,
-                password=password,
+                author_note=author_note,
                 trace_enabled=trace_enabled,
             )
             await self.resource_repo.create(session, obj_in=resource_data)
@@ -485,11 +492,16 @@ class UploadService(BaseService):
         interaction: discord.Interaction,
         attachments: list[discord.Attachment],
         version_info: str,
-        password: Optional[str],
+        author_note: Optional[str] = None,
         trace_enabled: bool = False,
         source_message: Optional[discord.Message] = None,
     ) -> str:
         """处理来自多附件上传模态框的提交。"""
+        # 在任何文件或数据库写入之前验证用户备注长度。
+        if author_note is not None and len(author_note) > AUTHOR_NOTE_MAX_LENGTH:
+            return f"❌ 作者备注最多允许 {AUTHOR_NOTE_MAX_LENGTH} 个字符。"
+        author_note = (author_note or "").strip() or None
+
         try:
             if (
                 source_message is not None
@@ -505,7 +517,7 @@ class UploadService(BaseService):
                     interaction=interaction,
                     attachments=attachments,
                     version_info=version_info,
-                    password=password,
+                    author_note=author_note,
                     trace_enabled=trace_enabled,
                     thread_model=thread_model,
                 )
@@ -576,7 +588,7 @@ class UploadService(BaseService):
         interaction: discord.Interaction,
         attachments: list[discord.Attachment],
         version_info: str,
-        password: Optional[str],
+        author_note: Optional[str],
         trace_enabled: bool,
         thread_model,
     ) -> str:
@@ -628,7 +640,7 @@ class UploadService(BaseService):
                     filename=attachment.filename,
                     version_info=version_info,
                     source_message_id=message.id,
-                    password=password,
+                    author_note=author_note,
                     trace_enabled=trace_enabled,
                 )
                 await self.resource_repo.create(session, obj_in=resource_data)
@@ -653,7 +665,7 @@ class UploadService(BaseService):
         interaction: discord.Interaction,
         message_link: str,
         version_info: Optional[str],
-        password: Optional[str],
+        author_note: Optional[str],
     ) -> str:
         """
         处理普通文件的上传逻辑，核心是验证并记录一个已存在的消息。
@@ -717,7 +729,7 @@ class UploadService(BaseService):
             filename=filename,
             version_info=version_info or "未提供",
             source_message_id=target_message.id,
-            password=password,
+            author_note=author_note,
         )
         await self.resource_repo.create(session, obj_in=resource_data)
 

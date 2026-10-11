@@ -184,7 +184,7 @@ class TestDownloadService:
             filename="test.zip",
             version_info="1.0",
             source_message_id=999,
-            password=None,
+            author_note=None,
         )
         await resource_repo.create(db_session, obj_in=resource_data)
         await db_session.commit()
@@ -328,7 +328,7 @@ class TestManagementServiceExtended:
             filename="old.zip",
             version_info="1.0",
             source_message_id=111,
-            password=None,
+            password="legacy-secret",
         )
         resource = await resource_repo.create(db_session, obj_in=resource_data)
         await db_session.commit()
@@ -339,11 +339,12 @@ class TestManagementServiceExtended:
             resource_id=resource.id,
             interaction=management_interaction(thread),
             version_info="2.0",
-            password="newpass",
+            author_note="新的作者说明",
         )
         assert updated is not None
         assert updated.version_info == "2.0"
-        assert updated.password == "newpass"
+        assert updated.author_note == "新的作者说明"
+        assert updated.password == "legacy-secret"
 
     async def test_delete_resource_normal(self, db_session: AsyncSession):
         """测试删除普通资源（仅删除数据库记录）。"""
@@ -373,7 +374,7 @@ class TestManagementServiceExtended:
             filename="normal.zip",
             version_info="1.0",
             source_message_id=222,
-            password=None,
+            author_note=None,
         )
         resource = await resource_repo.create(db_session, obj_in=resource_data)
         await db_session.commit()
@@ -427,7 +428,7 @@ class TestManagementServiceExtended:
             filename="secure.zip",
             version_info="1.0",
             source_message_id=333,
-            password=None,
+            author_note=None,
         )
         resource = await resource_repo.create(db_session, obj_in=resource_data)
         await db_session.commit()

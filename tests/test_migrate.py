@@ -173,6 +173,9 @@ def test_upgrade_current_head_preserves_resources_and_users(database_path):
         ])
     finally:
         engine.dispose()
+    # 去除新备注列，构造升级前 schema。
+    with closing(sqlite3.connect(str(database_path))) as conn:
+        conn.execute("ALTER TABLE resources DROP COLUMN author_note")
     # 写入旧迁移版本和具有密码、下载计数的资源，保存数据快照供比较。
     with closing(sqlite3.connect(str(database_path))) as conn:
         conn.executescript("""
@@ -186,8 +189,10 @@ def test_upgrade_current_head_preserves_resources_and_users(database_path):
             INSERT INTO users (id, has_agreed_to_privacy_policy, has_agreed_to_wishlist_policy, created_at)
                 VALUES (456, 1, 0, CURRENT_TIMESTAMP);
         """)
-        before = {name: conn.execute(f"SELECT * FROM {name}").fetchall()
-                  for name in ("threads", "resources", "users")}
+        columns = {name: ",".join(row[1] for row in conn.execute(f"PRAGMA table_info({name})"))
+                   for name in ("threads", "resources", "users")}
+        before = {name: conn.execute(f"SELECT {columns[name]} FROM {name}").fetchall()
+                  for name in columns}
     # 将迁移命令指向临时数据库，分别执行升级与回退。
     env = os.environ.copy()
     env["DATABASE_URL"] = f"sqlite+aiosqlite:///{database_path.resolve().as_posix()}"
@@ -200,7 +205,7 @@ def test_upgrade_current_head_preserves_resources_and_users(database_path):
         assert result.returncode == 0, result.stderr
         # 每次迁移后检查原数据完全保留，授权表仅在升级后存在。
         with closing(sqlite3.connect(str(database_path))) as conn:
-            assert {name: conn.execute(f"SELECT * FROM {name}").fetchall()
+            assert {name: conn.execute(f"SELECT {columns[name]} FROM {name}").fetchall()
                     for name in before} == before
             tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             assert ("author_collaborators" in tables) is (action == "upgrade")
@@ -221,6 +226,12 @@ def test_upgrade_adds_thread_source_metadata_to_wishlist_head(database_path):
         );
         CREATE INDEX ix_threads_public_thread_id
             ON threads (public_thread_id);
+        CREATE TABLE resources (
+            id INTEGER PRIMARY KEY NOT NULL, thread_id INTEGER NOT NULL,
+            version_info TEXT NOT NULL, upload_mode VARCHAR(6) NOT NULL,
+            password TEXT, description TEXT, source_message_id BIGINT NOT NULL,
+            filename VARCHAR(255), created_at DATETIME, download_count INTEGER NOT NULL
+        );
         CREATE TABLE alembic_version (
             version_num VARCHAR(32) NOT NULL PRIMARY KEY
         );
@@ -263,7 +274,7 @@ def test_upgrade_adds_thread_source_metadata_to_wishlist_head(database_path):
         ).fetchone() == (None, None, "unknown")
         assert conn.execute(
             "SELECT version_num FROM alembic_version"
-        ).fetchone() == ("a9c2e5f8b1d4",)
+        ).fetchone() == ("b6d8f0a2c4e1",)
         assert conn.execute("SELECT author_id FROM threads").fetchone() == (456,)
         columns = {row[1] for row in conn.execute("PRAGMA table_info(author_collaborators)")}
         assert {"author_id", "collaborator_id", "granted_by", "created_at"} <= columns
@@ -272,3 +283,58 @@ def test_upgrade_adds_thread_source_metadata_to_wishlist_head(database_path):
             conn.execute("INSERT INTO author_collaborators (author_id, collaborator_id, granted_by) VALUES (456, 789, 456)")
     finally:
         conn.close()
+
+
+
+def test_author_note_upgrade_and_downgrade_preserve_existing_columns_and_data(database_path):
+    """备注迁移只增删独立 Text 列，保留历史密码、描述及其他业务数据。"""
+    from contextlib import closing
+    from sqlalchemy import create_engine
+    from src.models import Base
+
+    # 使用上一版本真实结构，避免测试直接依赖用户数据库。
+    engine = create_engine(f"sqlite:///{database_path.as_posix()}")
+    Base.metadata.create_all(engine)
+    engine.dispose()
+    with closing(sqlite3.connect(str(database_path))) as conn:
+        conn.execute("ALTER TABLE resources DROP COLUMN author_note")
+        conn.executescript("""
+            CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL PRIMARY KEY);
+            INSERT INTO alembic_version VALUES ('a9c2e5f8b1d4');
+            INSERT INTO threads (id, public_thread_id, author_id, quick_mode_enabled, created_at)
+                VALUES (1, 123, 456, 1, CURRENT_TIMESTAMP);
+            INSERT INTO resources (id, thread_id, upload_mode, version_info, filename,
+                source_message_id, password, description, download_count, created_at)
+                VALUES (1, 1, 'SECURE', 'v1', 'card.png', 789, 'old-password', 'old-description', 42, CURRENT_TIMESTAMP);
+            INSERT INTO users (id, has_agreed_to_privacy_policy, has_agreed_to_wishlist_policy, created_at)
+                VALUES (456, 1, 1, CURRENT_TIMESTAMP);
+            INSERT INTO wishlist_items (id, user_id, resource_id, created_at)
+                VALUES (1, 456, 1, CURRENT_TIMESTAMP);
+            INSERT INTO author_collaborators (author_id, collaborator_id, granted_by)
+                VALUES (456, 999, 456);
+        """)
+        columns = {name: ",".join(row[1] for row in conn.execute(f"PRAGMA table_info({name})"))
+                   for name in ("threads", "resources", "users", "wishlist_items", "author_collaborators")}
+        before = {name: conn.execute(f"SELECT {columns[name]} FROM {name}").fetchall() for name in columns}
+        old_resource_schema = conn.execute("PRAGMA table_info(resources)").fetchall()
+    env = os.environ.copy()
+    env["DATABASE_URL"] = f"sqlite+aiosqlite:///{database_path.resolve().as_posix()}"
+    for action, target in (("upgrade", "head"), ("downgrade", "a9c2e5f8b1d4")):
+        result = subprocess.run([sys.executable, "-m", "alembic", action, target],
+                                cwd=Path(__file__).resolve().parents[1], env=env,
+                                capture_output=True, text=True, encoding="utf-8")
+        assert result.returncode == 0, result.stderr
+        with closing(sqlite3.connect(str(database_path))) as conn:
+            assert {name: conn.execute(f"SELECT {columns[name]} FROM {name}").fetchall() for name in columns} == before
+            schema = conn.execute("PRAGMA table_info(resources)").fetchall()
+            if action == "upgrade":
+                assert schema[:-1] == old_resource_schema
+                assert schema[-1][1:4] == ("author_note", "TEXT", 0)
+                assert conn.execute("SELECT author_note FROM resources").fetchone() == (None,)
+                # 验证数据库可存储超过当前用户输入上限的备注。
+                note = "long-note" * 1000
+                conn.execute("UPDATE resources SET author_note=? WHERE id=1", (note,))
+                conn.commit()
+                assert conn.execute("SELECT author_note FROM resources").fetchone() == (note,)
+            else:
+                assert schema == old_resource_schema

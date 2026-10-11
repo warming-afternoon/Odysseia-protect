@@ -35,7 +35,10 @@ class Resource(Base):
     """资源模式：NORMAL 引用公开帖内消息，SECURE 将附件保存在私密仓库。"""
 
     password: Mapped[str | None] = mapped_column(Text, nullable=True)
-    """受保护资源的下载密码；为空时不要求输入密码。"""
+    """历史下载密码，仅保留数据库兼容性，不再参与资源维护或交付。"""
+
+    author_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    """作者备注；数据库不限制长度，用户填写入口单独限制字符数。"""
 
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     """可选的资源描述或备注；未填写时为空。"""

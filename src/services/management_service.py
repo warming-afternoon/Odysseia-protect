@@ -11,8 +11,10 @@ import discord
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.config import AUTHOR_NOTE_MAX_LENGTH
 from src.models import Resource
 from src.enums import UploadMode
+from src.qo.resource_update import ResourceUpdate
 from src.services.base import BaseService
 from src.ui.management_ui import ManagementView
 from src.utils.formatting import format_resource_list_chunks
@@ -222,7 +224,7 @@ class ManagementService(BaseService):
         resource_id: int,
         interaction: discord.Interaction,
         version_info: str,
-        password: Optional[str],
+        author_note: Optional[str] = None,
     ) -> Optional[Resource]:
         """根据 ID 更新一个资源的信息。"""
         db_obj = await self.resource_repo.get_with_thread(session, id=resource_id)
@@ -232,7 +234,12 @@ class ManagementService(BaseService):
             session, interaction=interaction, thread_repo=self.thread_repo, thread_model=db_obj.thread,
         )
 
-        update_data = {"version_info": version_info, "password": password}
+        # 限制用户提交长度，保留数据库文本字段的扩展空间。
+        if author_note is not None and len(author_note) > AUTHOR_NOTE_MAX_LENGTH:
+            raise ValueError(f"作者备注最多允许 {AUTHOR_NOTE_MAX_LENGTH} 个字符。")
+        update_data = ResourceUpdate(
+            version_info=version_info, author_note=(author_note or "").strip() or None,
+        )
         updated_resource = await self.resource_repo.update(
             session, db_obj=db_obj, obj_in=update_data
         )

@@ -21,7 +21,8 @@ from src.database.repositories.user import UserRepository
 from src.services.collaborator_service import CollaboratorService
 from src.services.management_service import ManagementService
 from src.services.upload_service import UploadService
-from src.ui.management_ui import ManagementModal, ReplaceSourceModal
+from src.ui.management_modal import ManagementModal
+from src.ui.management_ui import ReplaceSourceModal
 from src.utils.auth import (
     can_edit_collaborators, is_thread_author, parse_user_id,
     require_thread_manager, resolve_thread_author,
@@ -202,11 +203,11 @@ async def test_first_collaborator_upload_keeps_original_author(db_session, mode)
     # 分别覆盖普通上传、受保护上传和消息附件批量上传。
     if mode == "secure_batch":
         result = await upload.handle_secure_upload_submission_from_message(
-            db_session, interaction=actor, attachments=[file], version_info="v1", password=None,
+            db_session, interaction=actor, attachments=[file], version_info="v1", author_note=None,
         )
     else:
         result = await upload.handle_upload_submission(
-            db_session, interaction=actor, mode=mode, version_info="v1", password=None,
+            db_session, interaction=actor, mode=mode, version_info="v1", author_note=None,
             file=file if mode == "secure" else None,
             message_link="https://discord.com/channels/1/10/99" if mode == "normal" else None,
         )
@@ -260,7 +261,7 @@ async def test_resource_writes_allowed_then_denied_after_revoke(db_session, oper
         # 所有分支都携带同一交互上下文，验证服务写入时独立复核权限。
         if operation == "edit":
             return await manage.update_resource(db_session, resource_id=resource.id,
-                                                interaction=actor, version_info="v2", password="pw")
+                                                interaction=actor, version_info="v2", author_note="作者说明")
         if operation == "replace":
             return await manage.replace_resource_source(
                 db_session, resource_id=resource.id, interaction=actor, attachment=attachment,
@@ -309,6 +310,8 @@ async def test_open_panels_and_modals_stop_working_after_revoke(db_session, monk
     # 界面回调使用独立会话，从数据库读取最新授权状态。
     monkeypatch.setattr("src.ui.management_ui.AsyncSessionLocal",
                         async_sessionmaker(db_session.bind, expire_on_commit=False))
+    monkeypatch.setattr("src.ui.management_modal.AsyncSessionLocal",
+                        async_sessionmaker(db_session.bind, expire_on_commit=False))
     panel = (await manage.handle_management_request(db_session, interaction=original, selected_resource_id=resource.id))["view"]
     resource_id = resource.id
     await db_session.commit()
@@ -316,6 +319,7 @@ async def test_open_panels_and_modals_stop_working_after_revoke(db_session, monk
     db_session.expunge_all()
     edit = ManagementModal(resource, manage, panel)
     edit.version_info_input._value = "changed"
+    edit.author_note_input._value = "撤销后不应写入的备注"
     replace = ReplaceSourceModal(resource, panel)
     await panel.delete_button.callback(original)
     delete_view = original.response.edit_message.call_args.kwargs["view"]
@@ -340,6 +344,7 @@ async def test_open_panels_and_modals_stop_working_after_revoke(db_session, monk
     # 最终资源信息和来源保持原值，证明旧表单未产生写入。
     resource = await db_session.get(Resource, resource_id)
     assert resource.version_info == "v1" and resource.source_message_id == 99
+    assert resource.author_note is None
 
 
 @pytest.mark.asyncio
@@ -360,12 +365,12 @@ async def test_old_upload_submission_denied_after_revoke(db_session, batch):
     # 分别提交消息附件批量上传与单文件上传，模拟尚未提交的旧表单。
     if batch:
         result = await upload.handle_secure_upload_submission_from_message(
-            db_session, interaction=actor, attachments=[file], version_info="v1", password=None,
+            db_session, interaction=actor, attachments=[file], version_info="v1", author_note=None,
         )
     else:
         result = await upload.handle_upload_submission(
             db_session, interaction=actor, mode="secure", file=file,
-            version_info="v1", password=None,
+            version_info="v1", author_note=None,
         )
     # 拒绝发生在读取附件前，数据库也不能留下资源记录。
     assert "权限不足" in result
@@ -483,7 +488,7 @@ async def test_fresh_database_initializes_collaborators_and_current_revision(mon
             # 同时检查授权表和迁移版本，确保初始化结果可继续执行后续迁移。
             tables = await connection.run_sync(lambda sync: inspect(sync).get_table_names())
             assert "author_collaborators" in tables
-            assert (await connection.execute(text("SELECT version_num FROM alembic_version"))).scalar_one() == "a9c2e5f8b1d4"
+            assert (await connection.execute(text("SELECT version_num FROM alembic_version"))).scalar_one() == "b6d8f0a2c4e1"
     finally:
         # 释放独立测试引擎，避免连接残留影响其他测试。
         await engine.dispose()
@@ -520,7 +525,7 @@ async def test_unknown_author_upload_creates_no_records(db_session):
     upload, _ = services()
     actor = interaction(owner=None)
     result = await upload.handle_upload_submission(
-        db_session, interaction=actor, mode="normal", version_info="v1", password=None,
+        db_session, interaction=actor, mode="normal", version_info="v1", author_note=None,
         message_link="https://discord.com/channels/1/10/99",
     )
     # 明确拒绝未知作者操作，同时确保未产生任何帖子或资源记录。
