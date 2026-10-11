@@ -8,6 +8,7 @@ import asyncio
 import logging
 import os
 import sys
+from contextlib import AsyncExitStack
 from pathlib import Path
 
 import discord
@@ -24,6 +25,7 @@ from src.services.download_service import DownloadService
 from src.services.management_service import ManagementService
 from src.services.object_store import R2ObjectStore
 from src.services.rate_limit_service import RateLimitService
+from src.services.source_url_cache_service import SourceUrlCacheService
 from src.services.traceability_service import TraceabilityService
 from src.services.upload_service import UploadService
 from src.services.verification_service import VerificationService
@@ -85,6 +87,7 @@ class OdysseiaProtect(commands.Bot):
         user_repo = UserRepository()
         wishlist_repo = WishlistRepository()
         self.rate_limit_service = RateLimitService()
+        self.source_url_cache_service = SourceUrlCacheService()
         self.traceability_service = TraceabilityService.from_environment()
         self.object_store = R2ObjectStore()
         self.delivery_service = DeliveryService(
@@ -124,6 +127,7 @@ class OdysseiaProtect(commands.Bot):
         await init_db()
         logger.info("数据库初始化完成。")
 
+        await self.source_url_cache_service.start()
         await self.rate_limit_service.start()
         await self.delivery_service.start()
         await self.verification_service.start()
@@ -172,16 +176,19 @@ class OdysseiaProtect(commands.Bot):
         logger.info("Bot 已完全准备就绪。")
 
     async def close(self):
-        """关闭业务服务、限流连接和 Discord 会话。"""
-        # 即使业务服务清理失败，也释放限流与 Discord 自有连接。
-        try:
-            await self.verification_service.close()
-            await self.delivery_service.close()
-        finally:
-            try:
-                await self.rate_limit_service.close()
-            finally:
-                await super().close()
+        """依次关闭业务服务和连接，并在清理失败后继续释放其余资源。"""
+        # 按业务服务到基础连接的顺序释放资源，最后关闭 Discord 会话。
+        callbacks = (
+            self.verification_service.close,
+            self.delivery_service.close,
+            self.source_url_cache_service.close,
+            self.rate_limit_service.close,
+            super().close,
+        )
+        async with AsyncExitStack() as stack:
+            # 退出栈按注册顺序的逆序执行；单个回调失败不阻止其余回调。
+            for callback in reversed(callbacks):
+                stack.push_async_callback(callback)
 
 
 # --- 应用程序主入口 ---

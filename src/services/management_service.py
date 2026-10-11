@@ -201,6 +201,7 @@ class ManagementService(BaseService):
         finally:
             upload_file.close()
 
+        await self._invalidate_source_url(warehouse_id, expected_source_message_id)
         try:
             old_message = await channel.fetch_message(expected_source_message_id)
             await old_message.delete()
@@ -237,6 +238,19 @@ class ManagementService(BaseService):
         )
         return updated_resource
 
+    async def _invalidate_source_url(self, channel_id: int | None, message_id: int) -> None:
+        """清理指定源消息的附件链接缓存。"""
+        # 源频道和缓存服务是定位并清理缓存的必要条件。
+        cache = getattr(self.bot, "source_url_cache_service", None)
+        if cache is None or not channel_id:
+            return
+        try:
+            # 按源消息 ID 清理本地副本和 Redis 缓存。
+            await cache.invalidate(channel_id, [message_id])
+        except Exception:
+            # 缓存清理属于尽力执行的附加操作，失败仅告警以保证资源管理流程完成。
+            logger.exception("清理源附件 URL 缓存失败：%s/%s", channel_id, message_id)
+
     async def delete_resource(
         self, session: AsyncSession, *, resource_id: int, interaction: discord.Interaction,
     ) -> bool:
@@ -258,6 +272,13 @@ class ManagementService(BaseService):
             thread_model=resource_to_delete.thread,
         )
 
+        # 删除资源前记录源位置，供源消息删除后的缓存清理使用。
+        source_message_id = resource_to_delete.source_message_id
+        source_channel_id = (
+            resource_to_delete.thread.warehouse_thread_id or resource_to_delete.thread.public_thread_id
+            if resource_to_delete.upload_mode == UploadMode.SECURE
+            else resource_to_delete.thread.public_thread_id
+        )
         # 步骤 2: 如果是受保护文件，尝试删除 Discord 上的源文件消息 (尽力而为)
         if resource_to_delete.upload_mode == UploadMode.SECURE:
             try:
@@ -291,6 +312,9 @@ class ManagementService(BaseService):
                     f"删除受保护文件源消息 {resource_to_delete.source_message_id} 时发生未知错误。",
                     exc_info=e,
                 )
+            finally:
+                # 及时清理原消息的下载链接，避免数据库删除失败后遗留无效缓存。
+                await self._invalidate_source_url(source_channel_id, source_message_id)
         else:
             # 对于普通文件，我们只记录日志，绝不删除用户自己的消息
             logger.info(
@@ -301,6 +325,8 @@ class ManagementService(BaseService):
         # 步骤 3: 从数据库中删除记录
         deleted_obj = await self.resource_repo.remove(session, id=resource_id)
         if deleted_obj:
+            if resource_to_delete.upload_mode == UploadMode.NORMAL:
+                await self._invalidate_source_url(source_channel_id, source_message_id)
             logger.info(f"成功从数据库删除资源 {resource_id}")
         return deleted_obj is not None
 

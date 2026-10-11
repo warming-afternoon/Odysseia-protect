@@ -104,36 +104,47 @@ class DownloadService(BaseService):
         ):
             logger.warning("下载计数资源已不存在：%s", resource_id)
 
+    async def _fetch_attachment_url(self, channel_id: int, message_id: int) -> str:
+        """获取指定源消息第一个附件的有效下载链接。"""
+        # 验证源频道支持文本消息和附件读取。
+        source_channel = await self.bot.fetch_channel(channel_id)
+        if not isinstance(source_channel, (discord.TextChannel, discord.Thread)):
+            raise ValueError("资源源频道类型无效。")
+        # 每个资源对应源消息的第一个附件，链接签名由 Discord 提供。
+        source_message = await source_channel.fetch_message(message_id)
+        if not source_message.attachments:
+            raise ValueError("源消息中没有附件。")
+        return source_message.attachments[0].url
+
     async def fetch_fresh_url(self, resource: ResourceDTO) -> str:
-        """根据源消息动态获取当前有效的 Discord 附件 URL。"""
+        """获取资源的有效下载链接，并复用未过期的源附件缓存。"""
+        # 普通资源读取公开源消息，受保护资源优先读取仓库帖子。
         if resource.upload_mode == UploadMode.NORMAL:
             channel_id = resource.public_thread_id
         else:
             channel_id = resource.warehouse_thread_id or resource.public_thread_id
         if not channel_id:
             raise ValueError("数据库中未找到该资源关联的频道ID。")
-
-        source_channel = await self.bot.fetch_channel(channel_id)
-        if not isinstance(source_channel, (discord.TextChannel, discord.Thread)):
-            raise ValueError("资源源频道类型无效。")
-
-        source_message = await source_channel.fetch_message(resource.source_message_id)
-        if not source_message.attachments:
-            raise ValueError("源消息中没有附件。")
-        return source_message.attachments[0].url
+        # 下载与心愿单按源消息共享附件链接缓存。
+        return await self.bot.source_url_cache_service.get_url(
+            channel_id, resource.source_message_id,
+            lambda: self._fetch_attachment_url(channel_id, resource.source_message_id),
+        )
 
     async def fetch_source_bytes(self, resource: ResourceDTO) -> bytes:
-        """读取仓库中的源附件，仅供动态溯源缓存未命中时使用。"""
-        channel_id = resource.warehouse_thread_id or resource.public_thread_id
+        """读取资源原图数据，供生成个性化溯源副本使用。"""
+        # 普通资源读取公开源消息，受保护资源优先读取仓库帖子。
+        if resource.upload_mode == UploadMode.NORMAL:
+            channel_id = resource.public_thread_id
+        else:
+            channel_id = resource.warehouse_thread_id or resource.public_thread_id
         if not channel_id:
             raise ValueError("数据库中未找到该资源关联的频道ID。")
-        source_channel = await self.bot.fetch_channel(channel_id)
-        if not isinstance(source_channel, (discord.TextChannel, discord.Thread)):
-            raise ValueError("资源源频道类型无效。")
-        source_message = await source_channel.fetch_message(resource.source_message_id)
-        if not source_message.attachments:
-            raise ValueError("源消息中没有附件。")
-        return await source_message.attachments[0].read()
+        # 缓存服务负责原图下载以及失效链接的刷新重试。
+        return await self.bot.source_url_cache_service.read_source(
+            channel_id, resource.source_message_id,
+            lambda: self._fetch_attachment_url(channel_id, resource.source_message_id),
+        )
 
     async def fetch_delivery(
         self,
