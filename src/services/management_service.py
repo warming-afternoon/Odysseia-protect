@@ -12,6 +12,8 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import AUTHOR_NOTE_MAX_LENGTH
+from src.dto.download_page_dto import DOWNLOAD_PAGE_SIZE, DownloadPageDTO
+from src.dto.management_resource_dto import ManagementResourceDTO
 from src.models import Resource
 from src.enums import UploadMode
 from src.qo.resource_update import ResourceUpdate
@@ -29,6 +31,7 @@ class ManagementService(BaseService):
     async def handle_management_request(
         self, session: AsyncSession, *, interaction: discord.Interaction,
         selected_resource_id: int | None = None,
+        page: int = 1,
     ) -> dict[str, Any]:
         """处理 /管理 命令的请求，返回管理视图。"""
         if not interaction.channel or not isinstance(
@@ -62,9 +65,20 @@ class ManagementService(BaseService):
                 title="🚫 权限不足", description=str(exc), color=discord.Color.red(),
             )}
 
-        # 获取该帖子的所有资源
-        resources = await self.resource_repo.get_by_thread_id(
+        # 与下载面板共用分页查询，按上传时间和主键倒序排列。
+        total = await self.resource_repo.count_by_thread_id(
             session, thread_id=thread_model.id
+        )
+        max_page = max(1, (total + DOWNLOAD_PAGE_SIZE - 1) // DOWNLOAD_PAGE_SIZE)
+        page = min(max(1, page), max_page)
+        records = await self.resource_repo.get_page_by_thread_id(
+            session, thread_id=thread_model.id,
+            offset=(page - 1) * DOWNLOAD_PAGE_SIZE, limit=DOWNLOAD_PAGE_SIZE,
+        )
+        resources = [ManagementResourceDTO.model_validate(record) for record in records]
+        page_data = DownloadPageDTO(
+            public_thread_id=interaction.channel.id, page=page,
+            total=total, max_page=max_page,
         )
 
         embed = discord.Embed(
@@ -122,9 +136,11 @@ class ManagementService(BaseService):
                 name = "📄 资源" if i == 0 else "📄 资源 (续)"
                 embed.add_field(name=name, value=chunk, inline=False)
 
+        embed.set_footer(text=f"第 {page}/{max_page} 页 · 共 {total} 个版本")
         view = ManagementView(
             resources, self, interaction, thread_model,
             selected_resource_id=selected_resource_id,
+            page_data=page_data,
         )
         return {"embed": embed, "view": view}
 
