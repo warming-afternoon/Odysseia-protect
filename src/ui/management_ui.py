@@ -4,12 +4,16 @@
 """
 
 import logging
+import asyncio
 from typing import Sequence, Optional, TYPE_CHECKING
 
 import discord
 
 from src.database.database import AsyncSessionLocal
-from src.models import Resource, Thread
+from src.dto.download_page_dto import DownloadPageDTO
+from src.dto.management_resource_dto import ManagementResourceDTO
+from src.ui.download_page_jump_modal import DownloadPageJumpModal
+from src.models import Thread
 from src.enums import UploadMode
 from src.ui.management_modal import ManagementModal
 from src.utils.auth import require_thread_manager, send_private_error
@@ -30,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 
 class ReplaceSourceModal(discord.ui.Modal, title="换源"):
-    def __init__(self, resource: Resource, view: "ManagementView"):
+    def __init__(self, resource: ManagementResourceDTO, view: "ManagementView"):
         super().__init__(timeout=300)
         self.management_view = view
         self.resource_id = resource.id
@@ -76,14 +80,16 @@ class DeleteConfirmationView(discord.ui.View):
 
     def __init__(
         self,
-        resource: Resource,
+        resource: ManagementResourceDTO,
         service: "ManagementService",
         original_interaction: discord.Interaction,
+        page: int = 1,
     ):
         super().__init__(timeout=180)  # 3分钟超时
         self.resource = resource
         self.service = service
         self.original_interaction = original_interaction
+        self.page = page
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if not await check_management_actor(interaction, self.original_interaction):
@@ -139,6 +145,7 @@ class DeleteConfirmationView(discord.ui.View):
             refreshed_panel = await self.service.handle_management_request(
                 session, interaction=self.original_interaction,
                 selected_resource_id=self.resource.id,
+                page=self.page,
             )
             refreshed_panel.setdefault("view", None)
             await self.original_interaction.edit_original_response(**refreshed_panel)
@@ -154,6 +161,7 @@ class DeleteConfirmationView(discord.ui.View):
             refreshed_panel = await self.service.handle_management_request(
                 session, interaction=self.original_interaction,
                 selected_resource_id=self.resource.id,
+                page=self.page,
             )
             refreshed_panel.setdefault("view", None)
             await self.original_interaction.edit_original_response(**refreshed_panel)
@@ -164,17 +172,22 @@ class ManagementView(discord.ui.View):
 
     def __init__(
         self,
-        resources: Sequence[Resource],
+        resources: Sequence[ManagementResourceDTO],
         service: "ManagementService",
         original_interaction: discord.Interaction,
         thread: "Thread",
         selected_resource_id: Optional[int] = None,
+        page_data: DownloadPageDTO | None = None,
     ):
         super().__init__(timeout=300)  # 5分钟后超时
         self.resources = {r.id: r for r in resources}
         self.service = service
         self.original_interaction = original_interaction
         self.thread = thread
+        self.page_data = page_data or DownloadPageDTO(
+            public_thread_id=original_interaction.channel.id, total=len(resources),
+        )
+        self.state_lock = asyncio.Lock()
         self.selected_resource_id: Optional[int] = None
 
         # 只有在有资源的情况下才添加资源管理组件
@@ -198,6 +211,55 @@ class ManagementView(discord.ui.View):
         # 添加快捷模式按钮
         self.toggle_quick_mode_button = self.ToggleQuickModeButton(thread)
         self.add_item(self.toggle_quick_mode_button)
+        # 与下载面板保持相同的导航顺序，单页时隐藏分页行。
+        if self.page_data.max_page > 1:
+            page = self.page_data.page
+            last = self.page_data.max_page
+            for label, target, disabled in (
+                ("⏮️", 1, page == 1), ("◀️", page - 1, page == 1),
+                (f"{page}/{last}", None, False),
+                ("▶️", page + 1, page == last), ("⏭️", last, page == last),
+            ):
+                button = discord.ui.Button(
+                    label=label, row=2, disabled=disabled,
+                    style=discord.ButtonStyle.primary if target is None
+                    else discord.ButtonStyle.secondary,
+                )
+                button.callback = self.page_callback(target)
+                self.add_item(button)
+
+    def page_callback(self, target: int | None):
+        """创建翻页或打开页码输入框的回调。"""
+        # 页码按钮复用下载面板的输入校验及权限检查。
+        async def callback(interaction: discord.Interaction):
+            """响应导航按钮并委托面板加载目标页。"""
+            if target is None:
+                await interaction.response.send_modal(DownloadPageJumpModal(self))
+            else:
+                await self.go_to_page(interaction, target)
+
+        return callback
+
+    async def go_to_page(self, interaction: discord.Interaction, page: int):
+        """重新查询目标页并在更新成功后停用旧视图。"""
+        await interaction.response.defer()
+        async with self.state_lock:
+            # 忽略旧面板上已经排队的点击，防止覆盖更新后的页面。
+            if self.is_finished():
+                return
+            try:
+                async with AsyncSessionLocal() as session:
+                    panel = await self.service.handle_management_request(
+                        session, interaction=self.original_interaction, page=page,
+                    )
+                panel.setdefault("view", None)
+                await self.original_interaction.edit_original_response(**panel)
+                self.stop()
+            except Exception:
+                logger.exception("管理资源分页失败")
+                await interaction.followup.send(
+                    "❌ 获取资源页面失败，请稍后重试。", ephemeral=True,
+                )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if not await check_management_actor(interaction, self.original_interaction):
@@ -231,6 +293,7 @@ class ManagementView(discord.ui.View):
                 panel = await self.service.handle_management_request(
                     session, interaction=self.original_interaction,
                     selected_resource_id=self.selected_resource_id,
+                    page=self.page_data.page,
                 )
             panel.setdefault("view", None)
             await self.original_interaction.edit_original_response(**panel)
@@ -252,9 +315,9 @@ class ManagementView(discord.ui.View):
             pass  # 消息可能已被删除
 
     class ResourceManagementSelect(discord.ui.Select):
-        def __init__(self, resources: Sequence[Resource]):
+        def __init__(self, resources: Sequence[ManagementResourceDTO]):
             options = []
-            for r in resources[:25]:
+            for r in resources:
                 mode_icon = "🔒" if r.upload_mode == UploadMode.SECURE else "📄"
                 
                 # 构建 label 和 description，确保不超过 Discord 的 100 字符限制
@@ -346,7 +409,8 @@ class ManagementView(discord.ui.View):
                     )
                     # 2. 创建包含“确认”和“取消”按钮的视图
                     confirmation_view = DeleteConfirmationView(
-                        resource, view.service, view.original_interaction
+                        resource, view.service, view.original_interaction,
+                        page=view.page_data.page,
                     )
                     # 3. 编辑原消息，显示确认界面
                     await interaction.response.edit_message(
@@ -470,6 +534,7 @@ class ManagementView(discord.ui.View):
                     refreshed_panel = await service.handle_management_request(
                         session, interaction=original_interaction,
                         selected_resource_id=view.selected_resource_id,
+                        page=view.page_data.page,
                     )
                     refreshed_panel.setdefault("view", None)
                     await original_interaction.edit_original_response(**refreshed_panel)

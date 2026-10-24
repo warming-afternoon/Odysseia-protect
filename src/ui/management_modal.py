@@ -7,7 +7,7 @@ import discord
 
 from src.config import AUTHOR_NOTE_MAX_LENGTH
 from src.database.database import AsyncSessionLocal
-from src.models import Resource
+from src.dto.management_resource_dto import ManagementResourceDTO
 from src.utils.auth import send_private_error
 
 if TYPE_CHECKING:
@@ -22,7 +22,7 @@ class ManagementModal(discord.ui.Modal, title="编辑资源信息"):
 
     def __init__(
         self,
-        resource: Resource,
+        resource: ManagementResourceDTO,
         service: "ManagementService",
         management_view: "ManagementView",
     ):
