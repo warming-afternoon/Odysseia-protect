@@ -1,4 +1,4 @@
-"""管理员批量核验 PNG、ZIP 与 7z 溯源样本。"""
+"""管理员批量核验 PNG、JSON、ZIP 与 7z 溯源样本。"""
 
 from __future__ import annotations
 
@@ -92,7 +92,8 @@ def _issued_at_text(value: object) -> str:
 
 def _render_markdown_report(report: dict) -> str:
     status_labels = {
-        "matched": "命中",
+        "matched": "凭证命中",
+        "content_mismatch": "凭证有效但内容不匹配",
         "not_found": "未找到凭证",
         "invalid": "凭证无效",
         "skipped": "已跳过",
@@ -113,10 +114,11 @@ def _render_markdown_report(report: dict) -> str:
         "",
         "| 项目 | 数量 |",
         "| --- | ---: |",
-        f"| 已处理 PNG | {summary.get('processed', 0)} |",
+        f"| 已处理 PNG / JSON | {summary.get('processed', 0)} |",
         f"| 命中 | {summary.get('matched', 0)} |",
         f"| 未找到凭证 | {summary.get('not_found', 0)} |",
         f"| 凭证无效 | {summary.get('invalid', 0)} |",
+        *([f"| 内容不匹配 | {summary['content_mismatch']} |"] if summary.get("content_mismatch") else []),
         f"| 已跳过项目 | {summary.get('skipped', 0)} |",
         "",
         "## 逐项结果",
@@ -147,6 +149,8 @@ def _render_markdown_report(report: dict) -> str:
                     f"- 协议版本：{_inline_code(payload.get('v', '未知'))}",
                 )
             )
+            if payload.get("author_id") is not None:
+                lines.append(f"- 作者 Discord 用户 ID：{_inline_code(payload['author_id'])}")
         if "key_id" in record:
             lines.append(f"- 密钥版本：{_inline_code(record['key_id'])}")
         if "layer_status" in record:
@@ -164,6 +168,19 @@ def _render_markdown_report(report: dict) -> str:
             lines.append(
                 "- 缺失水印层："
                 + "、".join(_inline_code(item) for item in missing_sources)
+            )
+        if "content_status" in record:
+            if record["content_status"] == "not_checked":
+                lines.append("- 内容核验：未检查卡片内容，仅认证签发凭证")
+            else:
+                lines.append(f"- 内容绑定：{_inline_code(record['content_status'])}")
+        if "context_status" in record:
+            lines.append(f"- 外部可信上下文：{_inline_code(record['context_status'])}")
+        for layer in record.get("layer_results") or []:
+            lines.append(
+                f"- 分层核验 {_inline_code(layer.get('source', '未知'))}："
+                f"{_inline_code(layer.get('status', '未知'))}"
+                + (f"（{_inline_code(layer['error'])}）" if layer.get("error") else "")
             )
         if record.get("error"):
             lines.append(f"- 说明：{_inline_code(record['error'])}")
@@ -191,9 +208,7 @@ def _discord_report_files(report: dict) -> list[discord.File]:
     report_id = str(report.get("report_id") or "trace-report")
     artifacts = build_report_artifacts(report)
     return [
-        discord.File(
-            io.BytesIO(artifacts.markdown), filename=f"{report_id}-report.md"
-        ),
+        discord.File(io.BytesIO(artifacts.markdown), filename=f"{report_id}-report.md"),
         discord.File(
             io.BytesIO(artifacts.details_json), filename=f"{report_id}-details.json"
         ),
@@ -258,9 +273,9 @@ class VerificationService:
         payloads: list[tuple[VerificationSubmission, bytes]] = []
         for attachment in attachments:
             suffix = Path(attachment.filename).suffix.lower()
-            if suffix not in {".png", ".zip", ".7z"}:
+            if suffix not in {".png", ".json", ".zip", ".7z"}:
                 raise ValueError(
-                    f"不支持 `{attachment.filename}`；只接受 PNG、ZIP 或 7z。"
+                    f"不支持 `{attachment.filename}`；只接受 PNG、JSON、ZIP 或 7z。"
                 )
             payloads.append(
                 (
@@ -366,7 +381,7 @@ class VerificationService:
         report_id: str,
     ) -> dict:
         suffix = Path(filename).suffix.lower()
-        if suffix == ".png":
+        if suffix in {".png", ".json"}:
             records = [self._verify_png(filename, data)]
         elif suffix == ".zip":
             records = self._verify_zip(data)
@@ -401,6 +416,9 @@ class VerificationService:
                 "sources": result["sources"],
                 "missing_sources": result["missing_sources"],
                 "layer_status": result["layer_status"],
+                "content_status": result.get("content_status", "unbound_legacy"),
+                "context_status": result.get("context_status", "not_provided"),
+                "layer_results": result.get("layer_results", []),
             }
         except WatermarkError as exc:
             text = str(exc)
@@ -433,7 +451,7 @@ class VerificationService:
                     continue
                 total += info.file_size
                 self._validate_sizes(name, info.file_size, info.compress_size, total)
-                if Path(name).suffix.lower() != ".png":
+                if Path(name).suffix.lower() not in {".png", ".json"}:
                     records.append({"name": name, "status": "skipped"})
                     continue
                 with archive.open(info) as member:
@@ -469,7 +487,7 @@ class VerificationService:
                         compressed = int(getattr(info, "compressed", 0) or 0)
                         total += size
                         self._validate_sizes(name, size, compressed, total)
-                        if Path(name).suffix.lower() == ".png":
+                        if Path(name).suffix.lower() in {".png", ".json"}:
                             targets.append(info.filename)
                         else:
                             records.append({"name": name, "status": "skipped"})
@@ -549,7 +567,10 @@ class VerificationService:
             return f"❌ `{job.report_id}` 失败：{job.error_message}", []
         if job.status != "completed":
             labels = {"queued": "排队中", "processing": "处理中"}
-            return f"⏳ `{job.report_id}` 当前状态：{labels.get(job.status, job.status)}", []
+            return (
+                f"⏳ `{job.report_id}` 当前状态：{labels.get(job.status, job.status)}",
+                [],
+            )
         if job.report_object_key and self.object_store.available:
             url = await self.object_store.presign_get(
                 job.report_object_key, expires_in=900

@@ -33,7 +33,7 @@ class UploadService(BaseService):
         safe_filename = filename.replace("`", "'")
         size_mib = size / (1024 * 1024)
         return ValueError(
-            "动态溯源仅支持不超过 25 MB 的 PNG 角色卡；"
+            "动态溯源仅支持不超过 25 MB 的角色卡；"
             f"文件 `{safe_filename}` 大小为 {size_mib:.2f} MiB。"
             "请缩小图片，或关闭动态溯源后上传。"
         )
@@ -56,7 +56,7 @@ class UploadService(BaseService):
             detail_parts.append(f"`{safe_name}`（{size / (1024 * 1024):.2f} MiB）")
         details = ", ".join(detail_parts)
         raise ValueError(
-            "动态溯源仅支持不超过 25 MB 的 PNG 角色卡；"
+            "动态溯源仅支持不超过 25 MB 的角色卡；"
             f"以下文件超过限制：{details}。请缩小图片，或关闭动态溯源后上传。"
         )
 

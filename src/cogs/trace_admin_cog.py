@@ -28,7 +28,7 @@ class TraceVerificationModal(discord.ui.Modal, title="溯源样本核验"):
         )
         self.add_item(
             discord.ui.Label(
-                text="上传 PNG、ZIP 或 7z",
+                text="上传 PNG、JSON、ZIP 或 7z",
                 description="每个附件独立生成报告；不接受密码包或嵌套压缩包",
                 component=self.file_upload,
             )
@@ -75,7 +75,7 @@ class TraceAdminCog(commands.Cog):
 
     trace_group = app_commands.Group(name="溯源", description="管理员溯源核验工具。")
 
-    @trace_group.command(name="核验", description="上传 PNG、ZIP 或 7z 样本进行核验。")
+    @trace_group.command(name="核验", description="上传 PNG、JSON、ZIP 或 7z 样本进行核验。")
     async def verify(self, interaction: discord.Interaction):
         if not is_trace_admin(interaction):
             await interaction.response.send_message(
