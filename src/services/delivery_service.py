@@ -12,6 +12,7 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from pathlib import Path
 
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
@@ -109,6 +110,7 @@ class DeliveryService:
                 str(resource.id),
                 str(resource.source_message_id),
                 self.traceability.key_id or "unconfigured",
+                getattr(self.traceability, "cache_version", "macro-trac-v2"),
             )
         )
         return "trace:delivery:cache:" + hashlib.sha256(raw.encode()).hexdigest()
@@ -116,9 +118,7 @@ class DeliveryService:
     @asynccontextmanager
     async def _local_lock(self, name: str) -> AsyncIterator[None]:
         async with self._local_guard:
-            state = self._local_locks.setdefault(
-                name, _LocalLockState(asyncio.Lock())
-            )
+            state = self._local_locks.setdefault(name, _LocalLockState(asyncio.Lock()))
             state.users += 1
         try:
             async with state.lock:
@@ -233,6 +233,7 @@ class DeliveryService:
                 user_id=user_id,
                 public_thread_id=resource.public_thread_id,
                 resource_id=resource.id,
+                author_id=resource.author_id,
             )
             if not self.object_store.available:
                 return DeliveryResult(
@@ -243,13 +244,17 @@ class DeliveryService:
             delivery_id = uuid.uuid4().hex
             object_key = (
                 f"deliveries/{time.strftime('%Y/%m/%d')}/"
-                f"{resource.id}/{delivery_id}.png"
+                f"{resource.id}/{delivery_id}{Path(personalized.filename).suffix}"
             )
             try:
                 await self.object_store.put_bytes(
                     object_key,
                     personalized.data,
-                    content_type="image/png",
+                    content_type=(
+                        "application/json"
+                        if personalized.filename.endswith(".json")
+                        else "image/png"
+                    ),
                     metadata={
                         "resource-id": str(resource.id),
                         "trace-key-id": self.traceability.key_id or "unknown",
@@ -365,9 +370,7 @@ class DeliveryService:
                 return len(keys)
             except Exception:
                 retry_at = time.time() + 60
-                await self._redis.zadd(
-                    EXPIRY_ZSET, {key: retry_at for key in keys}
-                )
+                await self._redis.zadd(EXPIRY_ZSET, {key: retry_at for key in keys})
                 raise
             finally:
                 for _, object_lock, cache_lock in locked:

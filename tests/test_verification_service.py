@@ -170,9 +170,9 @@ def test_report_zip_contains_markdown_and_details_json():
             "TR-REPORT-report.md",
             "TR-REPORT-details.json",
         }
-        assert "下载者 Discord 用户 ID" in archive.read(
-            "TR-REPORT-report.md"
-        ).decode("utf-8")
+        assert "下载者 Discord 用户 ID" in archive.read("TR-REPORT-report.md").decode(
+            "utf-8"
+        )
         details = json.loads(archive.read("TR-REPORT-details.json"))
         assert (
             details["records"][0]["payload"]["downloader_discord_user_id"]
@@ -256,3 +256,95 @@ async def test_report_response_preserves_r2_and_legacy_links(object_key, label):
     assert label in content
     assert "https://example.test/report" in content
     assert files == []
+
+
+@pytest.mark.asyncio
+async def test_json_direct_and_archives_are_verified(verifier, tmp_path):
+    source = json.dumps(
+        {"name": "test", "personality": "Calm", "scenario": "", "mes_example": ""}
+    ).encode()
+    marked = await verifier.traceability.personalize(
+        source, filename="card.json", user_id=1, public_thread_id=2, resource_id=3
+    )
+    direct = verifier.verify_attachment(
+        filename="card.json", data=marked.data, report_id="TR-JSON"
+    )
+    assert direct["summary"]["matched"] == 1
+    zipped = io.BytesIO()
+    with zipfile.ZipFile(zipped, "w") as archive:
+        archive.writestr("card.json", marked.data)
+    assert (
+        verifier.verify_attachment(
+            filename="cards.zip", data=zipped.getvalue(), report_id="TR-ZIP-JSON"
+        )["summary"]["matched"]
+        == 1
+    )
+    source_path = tmp_path / "card.json"
+    source_path.write_bytes(marked.data)
+    archive_path = tmp_path / "cards.7z"
+    with py7zr.SevenZipFile(archive_path, "w") as archive:
+        archive.write(source_path, "card.json")
+    assert (
+        verifier.verify_attachment(
+            filename="cards.7z", data=archive_path.read_bytes(), report_id="TR-7Z-JSON"
+        )["summary"]["matched"]
+        == 1
+    )
+
+
+@pytest.mark.asyncio
+async def test_edited_card_is_reported_as_credential_match(verifier):
+    source = json.dumps(
+        {"name": "test", "personality": "Calm", "scenario": "", "mes_example": ""}
+    ).encode()
+    marked = await verifier.traceability.personalize(
+        source, filename="card.json", user_id=1, public_thread_id=2, resource_id=3
+    )
+    edited = json.loads(marked.data)
+    edited["name"] = "A different character"
+    report = verifier.verify_attachment(
+        filename="card.json", data=json.dumps(edited).encode(), report_id="TR-MISMATCH"
+    )
+    assert report["summary"]["matched"] == 1
+    assert "content_mismatch" not in report["summary"]
+    assert report["records"][0]["status"] == "matched"
+    rendered = build_report_artifacts(report).markdown.decode()
+    assert "未检查卡片内容，仅认证签发凭证" in rendered
+    assert "凭证命中" in rendered
+    assert "内容不匹配" not in rendered
+
+
+@pytest.mark.parametrize("digest_version", [1, 2])
+@pytest.mark.parametrize("carrier", ["macro", "extension"])
+def test_old_credentials_with_changed_content_still_count_as_matches(
+    verifier, digest_version, carrier
+):
+    """历史两版摘要及正式服旧扩展在正文修改后仍能核验签发信息。"""
+    from src.traceability.watermark import (
+        _b64encode, canonical_json, card_content_sha256, create_envelope,
+    )
+
+    original = {"name": "original", "personality": "Calm"}
+    payload = {
+        "v": 1, "uid": "123", "resource_id": "789", "card_id": "discord-thread:456",
+        "author_id": "987", "issued_at": 100,
+        "content_sha256": [card_content_sha256(original, version=digest_version)],
+    }
+    if digest_version == 2:
+        payload["content_digest_version"] = 2
+    envelope = create_envelope(payload, bytes(range(32)), "test-v1")
+    edited = {"name": "edited", "personality": "Calm "}
+    if carrier == "macro":
+        edited["personality"] += "{{//0123456789abcdef:" + _b64encode(canonical_json(envelope)) + "}}"
+    else:
+        edited["extensions"] = {"odysseia_trace": envelope}
+    report = verifier.verify_attachment(
+        filename="old.json", data=canonical_json(edited), report_id="TR-OLD"
+    )
+    assert report["summary"]["matched"] == 1
+    assert "content_mismatch" not in report["summary"]
+    assert report["records"][0]["payload"] == payload
+    assert report["records"][0]["content_status"] == "not_checked"
+    rendered = build_report_artifacts(report).markdown.decode()
+    assert "作者 Discord 用户 ID：`987`" in rendered
+    assert "未检查卡片内容，仅认证签发凭证" in rendered

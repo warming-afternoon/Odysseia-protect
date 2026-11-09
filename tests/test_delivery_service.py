@@ -23,6 +23,7 @@ def resource() -> ResourceDTO:
         source_message_id=99,
         warehouse_thread_id=88,
         public_thread_id=77,
+        author_id=456,
         trace_enabled=True,
     )
 
@@ -53,6 +54,7 @@ async def test_same_user_resource_reuses_local_cache():
     assert second.cache_hit is True
     source_loader.assert_awaited_once()
     traceability.personalize.assert_awaited_once()
+    assert traceability.personalize.await_args.kwargs["author_id"] == 456
     store.put_bytes.assert_awaited_once()
     assert store.presign_get.await_count == 2
 
@@ -96,3 +98,22 @@ async def test_local_cleanup_batches_at_one_thousand():
     assert store.delete_many.await_count == 2
     first_batch = list(store.delete_many.await_args_list[0].args[0])
     assert len(first_batch) == 1000
+
+
+@pytest.mark.asyncio
+async def test_json_delivery_uses_json_extension_and_mime():
+    traceability = SimpleNamespace(
+        key_id="v1",
+        personalize=AsyncMock(
+            return_value=PersonalizedCard(b"{}", "card.personalized.json")
+        ),
+    )
+    store = FakeStore()
+    service = DeliveryService(traceability, store, redis_url="")
+    result = await service.deliver(
+        resource(), user_id=123, source_loader=AsyncMock(return_value=b"source")
+    )
+    assert result.filename == "card.personalized.json"
+    args = store.put_bytes.await_args
+    assert args.args[0].endswith(".json")
+    assert args.kwargs["content_type"] == "application/json"

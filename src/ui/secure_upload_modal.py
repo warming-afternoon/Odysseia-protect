@@ -46,7 +46,7 @@ class SecureUploadModal(UploadModal, title="上传受保护文件 - 填写信息
         )
         self.trace_input = discord.ui.TextInput(
             label="动态溯源（输入“开启”以启用，留空则关闭）",
-            placeholder="仅支持不超过 25 MB 的 PNG 角色卡",
+            placeholder="仅支持不超过 25 MB 的角色卡",
             style=discord.TextStyle.short,
             required=False,
             max_length=10,
