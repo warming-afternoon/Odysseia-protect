@@ -81,6 +81,8 @@ class TraceConsentView(discord.ui.View):
                 self.resource,
                 qo=ResourceDeliveryQo(user_id=interaction.user.id),
             )
+            if delivery.file_data is not None and len(delivery.file_data) > interaction.filesize_limit:
+                raise ValueError("交付文件超过本次 Discord 交互附件上限，R2 链接交付不可用。")
             interaction.client.dispatch("resource_downloaded", self.resource)
             if hasattr(panel_view, "authorize_selection"):
                 await panel_view.authorize_selection(

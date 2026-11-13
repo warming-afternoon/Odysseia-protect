@@ -13,14 +13,18 @@ from __future__ import annotations
 import hashlib
 import hmac
 import io
+import os
 import struct
 import time
 import zlib
 from collections.abc import Iterator, Sequence
 
 from .watermark import PNGChunk, WatermarkError, parse_png, serialize_png
+from .limits import DEFAULT_MAX_OUTPUT_BYTES, MAX_DECODED_BYTES
+from .lsb_skip_error import LSBSkipError
+from src.utils.env_config import positive_int
 
-MAX_INPUT_BYTES = 25 * 1024 * 1024
+MAX_INPUT_BYTES = DEFAULT_MAX_OUTPUT_BYTES
 MAX_PIXELS = 8_000_000
 MAX_PAYLOAD_BYTES = 8192
 MAX_KEYS = 8
@@ -40,7 +44,7 @@ class ExtractionNotFound(LSBWatermarkError):
 
 def _check_time(deadline: float) -> None:
     if time.monotonic() > deadline:
-        raise LSBWatermarkError("LSB 处理超过时间预算。")
+        raise LSBSkipError("time_budget", "LSB 处理超过时间预算。")
 
 
 def _validate(repetition: int) -> None:
@@ -54,9 +58,53 @@ def _derive(key: bytes, purpose: bytes) -> bytes:
     return hmac.digest(key, _DOMAIN + purpose, "sha256")
 
 
-def _load(data: bytes) -> tuple[list[PNGChunk], int, int, str, bytearray]:
+def _convert_chunks(
+    chunks: list[PNGChunk], depth: int, color: int, mode: str
+) -> list[PNGChunk]:
+    """转换随颜色模式变化的块，保留角色卡和有效色彩信息。"""
+    palette = next((chunk.data for chunk in chunks if chunk.chunk_type == b"PLTE"), b"")
+    result = []
+    for chunk in chunks:
+        kind, value = chunk.chunk_type, chunk.data
+        if kind in (b"PLTE", b"tRNS", b"hIST", b"dSIG"):
+            continue
+        if kind == b"IHDR":
+            value = value[:8] + bytes((8, 6 if mode == "RGBA" else 2, 0, 0, 0))
+        elif kind == b"bKGD":
+            if color == 3:
+                if len(value) != 1 or (value[0] + 1) * 3 > len(palette):
+                    raise LSBWatermarkError("PNG 调色板背景索引无效。")
+                rgb = palette[value[0] * 3 : (value[0] + 1) * 3]
+                value = struct.pack(">HHH", *rgb)
+            elif color in (0, 4):
+                if len(value) != 2:
+                    raise LSBWatermarkError("PNG 灰度背景数据无效。")
+                grey = int.from_bytes(value, "big")
+                if grey >= 1 << depth:
+                    raise LSBWatermarkError("PNG 灰度背景数值无效。")
+                grey = grey * 255 // ((1 << depth) - 1)
+                value = struct.pack(">HHH", grey, grey, grey)
+        elif kind == b"sBIT":
+            expected = {0: 1, 2: 3, 3: 3, 4: 2, 6: 4}[color]
+            maximum = 8 if color == 3 else depth
+            if len(value) != expected or any(not 0 < bit <= maximum for bit in value):
+                raise LSBWatermarkError("PNG 有效位深数据无效。")
+            if color in (0, 4):
+                value = value[:1] * 3 + (value[1:] if color == 4 else b"")
+            if mode == "RGBA" and len(value) == 3:
+                value += b"\x08"
+        result.append(PNGChunk(kind, value))
+    return result
+
+
+def _load(
+    data: bytes, *, convert: bool = False, max_bytes: int | None = None
+) -> tuple[list[PNGChunk], int, int, str, bytearray]:
+    """先检查格式和内存预算，再解码并按需转换静态八位图像。"""
     # 先检查 IHDR 和压缩输入大小，再允许 Pillow 解码，避免解压炸弹。
-    if len(data) > MAX_INPUT_BYTES:
+    if max_bytes is None:
+        max_bytes = positive_int(os.environ, "TRACE_MAX_OUTPUT_BYTES", MAX_INPUT_BYTES)
+    if len(data) > max_bytes:
         raise LSBWatermarkError("PNG 超过像素层输入上限。")
     chunks = parse_png(data)
     if len(chunks[0].data) != 13:
@@ -64,26 +112,65 @@ def _load(data: bytes) -> tuple[list[PNGChunk], int, int, str, bytearray]:
     width, height, depth, color, comp, filt, interlace = struct.unpack(
         ">IIBBBBB", chunks[0].data
     )
-    if not width or not height or width * height > MAX_PIXELS:
-        raise LSBWatermarkError("PNG 像素数超过安全上限。")
-    if depth != 8 or color not in (2, 6) or comp or filt or interlace:
-        raise LSBWatermarkError("像素层仅支持非交错 8-bit RGB/RGBA PNG。")
-    if any(c.chunk_type in (b"acTL", b"fcTL", b"fdAT", b"tRNS") for c in chunks):
-        raise LSBWatermarkError("不支持动画或 tRNS 透明色 PNG。")
+    allowed = {0: (1, 2, 4, 8, 16), 2: (8, 16), 3: (1, 2, 4, 8), 4: (8, 16), 6: (8, 16)}
+    if not width or not height or depth not in allowed.get(color, ()) or comp or filt or interlace not in (0, 1):
+        raise LSBWatermarkError("PNG 图像头参数无效。")
     if sum(c.chunk_type == b"IHDR" for c in chunks) != 1:
         raise LSBWatermarkError("PNG 存在重复 IHDR。")
-    mode = "RGBA" if color == 6 else "RGB"
+    if any(not (c.chunk_type[0] & 32) and c.chunk_type not in (b"IHDR", b"PLTE", b"IDAT", b"IEND") for c in chunks):
+        raise LSBWatermarkError("PNG 包含未知的关键块。")
+    if any(c.chunk_type in (b"acTL", b"fcTL", b"fdAT") for c in chunks):
+        raise LSBSkipError("animation", "动画 PNG 保留原编码，不写入像素层。")
+    if depth == 16:
+        raise LSBSkipError("bit_depth_16", "16 位 PNG 保留原精度，不写入像素层。")
+    if width * height > MAX_PIXELS:
+        raise LSBSkipError("pixel_limit", "PNG 像素数超过安全上限。")
+    transparency = next((c.data for c in chunks if c.chunk_type == b"tRNS"), None)
+    transparent = transparency is not None
+    if transparency is not None:
+        valid = color == 3 and 0 < len(transparency) <= 256
+        if color == 0:
+            valid = len(transparency) == 2 and int.from_bytes(transparency, "big") < 1 << depth
+        elif color == 2:
+            valid = len(transparency) == 6 and all(v <= 255 for v in struct.unpack(">HHH", transparency))
+        if not valid:
+            raise LSBWatermarkError("PNG 透明色数据无效。")
+    mode = "RGBA" if color in (4, 6) or transparent else "RGB"
+    if width * height * len(mode) > MAX_DECODED_BYTES:
+        raise LSBSkipError("decoded_limit", "解码后像素数据超过 50 MB。")
+    needs_conversion = color not in (2, 6) or interlace or transparent
+    if needs_conversion and not convert:
+        raise LSBSkipError("unsupported_format", "像素提取需要非交错 8-bit RGB/RGBA PNG。")
+    if color in (0, 4) and any(c.chunk_type in (b"iCCP", b"cICP") for c in chunks):
+        raise LSBSkipError("color_metadata", "无法安全转换灰度色彩配置，保留源图像。")
     try:
         from PIL import Image
 
         with Image.open(io.BytesIO(data)) as image:
-            if image.mode != mode or image.size != (width, height):
+            if image.size != (width, height):
                 raise LSBWatermarkError("PNG 解码模式不一致。")
-            pixels = bytearray(image.tobytes())
+            if needs_conversion:
+                working = image
+                if color == 0 and depth < 8 and transparency is not None:
+                    # Pillow 已展开灰度样本，但 tRNS 仍使用原位深的数值。
+                    working = image.convert("L")
+                    working.info["transparency"] = int.from_bytes(transparency, "big") * 255 // ((1 << depth) - 1)
+                try:
+                    with working.convert(mode) as converted:
+                        pixels = bytearray(converted.tobytes())
+                finally:
+                    if working is not image:
+                        working.close()
+            else:
+                if image.mode != mode:
+                    raise LSBWatermarkError("PNG 解码模式不一致。")
+                pixels = bytearray(image.tobytes())
     except ImportError as exc:
         raise LSBWatermarkError("像素层需要安装 Pillow 可选依赖。") from exc
     except (OSError, ValueError) as exc:
         raise LSBWatermarkError("PNG 像素解码失败。") from exc
+    if needs_conversion:
+        chunks = _convert_chunks(chunks, depth, color, mode)
     return chunks, width, height, mode, pixels
 
 
@@ -173,21 +260,25 @@ def _read(
 
 
 def embed_lsb(
-    png_data: bytes, payload: bytes, *, key: bytes, repetition: int = 3
+    png_data: bytes, payload: bytes, *, key: bytes, repetition: int = 3,
+    max_output_bytes: int | None = None,
 ) -> bytes:
-    """写入加密凭证字节；非 IDAT 块原样保留，Alpha 不变。"""
+    """按需转换后写入凭证，保留角色卡数据和 Alpha 并同步颜色元数据。"""
     _validate(repetition)
     auth_key = _derive(key, b"authentication")
     if not isinstance(payload, bytes) or not 0 < len(payload) <= MAX_PAYLOAD_BYTES:
         raise LSBWatermarkError("像素层载荷必须为 1..8192 字节。")
     deadline = time.monotonic() + MAX_SECONDS
-    chunks, width, height, mode, pixels = _load(png_data)
+    if max_output_bytes is None:
+        max_output_bytes = positive_int(os.environ, "TRACE_MAX_OUTPUT_BYTES", MAX_INPUT_BYTES)
+    chunks, width, height, mode, pixels = _load(png_data, convert=True, max_bytes=max_output_bytes)
+    _check_time(deadline)
     prefix = struct.pack(">4sBBI", b"ODYL", 2, repetition, len(payload))
     tag = hmac.digest(auth_key, prefix + payload, "sha256")[:16]
     packet = prefix + tag + payload
     capacity = width * height * 3
     if len(packet) * 8 * repetition > capacity:
-        raise LSBWatermarkError("图片容量不足。")
+        raise LSBSkipError("capacity", "图片容量不足。")
     # 重新发行时清空所有 RGB 低位，避免未知旧密钥的有效凭证残留。
     # 每个色值仍最多改变 1，Alpha 与其余七位不变。
     clear_lsb = bytes(value & 254 for value in range(256))
@@ -221,8 +312,8 @@ def embed_lsb(
         else:
             output.append(chunk)
     result = serialize_png(output)
-    if len(result) > MAX_INPUT_BYTES:
-        raise LSBWatermarkError("编码结果超过 PNG 输入上限。")
+    if len(result) > max_output_bytes:
+        raise LSBSkipError("output_limit", "编码结果超过交付输出上限。")
     return result
 
 
@@ -233,6 +324,7 @@ def extract_lsb_all(
     keys: Sequence[bytes] = (),
     repetition: int = 3,
     legacy_v1: bool = False,
+    max_input_bytes: int | None = None,
 ) -> list[bytes]:
     """单次解码与共享十秒预算下返回所有不同凭证，避免密钥顺序隐藏冲突。
 
@@ -257,7 +349,7 @@ def extract_lsb_all(
     ):
         raise LSBWatermarkError("V1 密钥无效。")
     deadline = time.monotonic() + MAX_SECONDS
-    _, width, height, mode, pixels = _load(png_data)
+    _, width, height, mode, pixels = _load(png_data, max_bytes=max_input_bytes)
     capacity = width * height * 3
     saw_header = False
     recovered: list[bytes] = []

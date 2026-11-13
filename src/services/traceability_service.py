@@ -7,7 +7,11 @@ import json
 import logging
 import os
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
+from src.utils.env_config import positive_int
+from src.traceability.limits import DEFAULT_MAX_OUTPUT_BYTES, MAX_SOURCE_BYTES
+from src.traceability.lsb_skip_error import LSBSkipError
 
 from src.traceability.lsb_watermark import (
     ExtractionNotFound,
@@ -29,7 +33,6 @@ from src.traceability.watermark import (
 
 logger = logging.getLogger(__name__)
 _TRUE_VALUES = {"1", "true", "yes", "on", "开启", "是"}
-MAX_SOURCE_BYTES = 25 * 1024 * 1024
 
 
 class TraceabilityUnavailableError(RuntimeError):
@@ -56,6 +59,7 @@ class TraceabilityService:
         verification_keys: dict[str, bytes] | None = None,
         lsb_enabled: bool = True,
         allow_empty_fields: bool = True,
+        max_output_bytes: int | None = None,
     ):
         self._key = key
         self._key_id = key_id
@@ -75,6 +79,8 @@ class TraceabilityService:
             raise WatermarkError("核验密钥配置无效，最多保留 8 个不同版本。")
         self._lsb_enabled = lsb_enabled
         self._allow_empty_fields = allow_empty_fields
+        values = os.environ if max_output_bytes is None else {"TRACE_MAX_OUTPUT_BYTES": str(max_output_bytes)}
+        self.max_output_bytes = positive_int(values, "TRACE_MAX_OUTPUT_BYTES", DEFAULT_MAX_OUTPUT_BYTES)
 
     @classmethod
     def from_environment(cls) -> TraceabilityService:
@@ -125,7 +131,10 @@ class TraceabilityService:
     @property
     def cache_version(self) -> str:
         """更改签发方案后隔离旧副本缓存，避免返回旧扩展水印。"""
-        return f"random-macro-trac-v1:credential-only:lsb={int(self._lsb_enabled)}:empty={int(self._allow_empty_fields)}"
+        return (
+            f"png-convert-v1:credential-only:lsb={int(self._lsb_enabled)}:"
+            f"empty={int(self._allow_empty_fields)}:output={self.max_output_bytes}"
+        )
 
     def verify(
         self,
@@ -139,14 +148,15 @@ class TraceabilityService:
         """分别提取载体并认证签发凭证，可核对外部可信上下文。"""
         if not self.available:
             raise TraceabilityUnavailableError("服务器尚未配置动态溯源密钥。")
-        if len(source) > MAX_SOURCE_BYTES:
-            raise WatermarkError("核验样本超过 25 MiB。")
+        if len(source) > self.max_output_bytes:
+            raise WatermarkError(f"核验样本超过 {self.max_output_bytes} 字节。")
         candidates = []
         layer_results = []
         if source.startswith(PNG_SIGNATURE):
             try:
                 payloads = extract_lsb_all(
-                    source, keys=list(self._keys.values()), repetition=3
+                    source, keys=list(self._keys.values()), repetition=3,
+                    max_input_bytes=self.max_output_bytes,
                 )
                 for raw in payloads:
                     try:
@@ -155,7 +165,7 @@ class TraceabilityService:
                         candidates.append(("pixel:lsb", None))
             except ExtractionNotFound:
                 pass
-            except LSBWatermarkError as exc:
+            except (LSBWatermarkError, LSBSkipError) as exc:
                 # 不支持的像素格式不妨碍结构层核验；报告明确记录检查限制。
                 layer_results.append(
                     {"source": "pixel:lsb", "status": "unavailable", "error": str(exc)}
@@ -223,7 +233,7 @@ class TraceabilityService:
         resource_id: int,
         author_id: int | None = None,
     ) -> PersonalizedCard:
-        """签发新副本，保留源文件；启用像素层时失败即中止交付。"""
+        """签发新副本，保留源文件；已知像素限制允许降级交付。"""
         if not self.available:
             raise TraceabilityUnavailableError("服务器尚未配置动态溯源密钥。")
         self.validate_character_card(filename, source)
@@ -261,36 +271,60 @@ class TraceabilityService:
                 allow_empty_fields=self._allow_empty_fields,
             )
         else:
-            if not self._lsb_enabled:
-                # 保留像素的路径不能携带上次签发的身份，否则新旧层会冲突。
-                try:
-                    old_pixels = extract_lsb_all(
-                        source, keys=list(self._keys.values()), repetition=3
-                    )
-                except ExtractionNotFound:
-                    old_pixels = []
-                except LSBWatermarkError:
-                    old_pixels = []
-                if old_pixels:
-                    raise WatermarkError(
-                        "源文件包含已有像素水印；请使用原始源文件，或开启像素层后重新签发。"
-                    )
-            output, _ = inject_watermark(
-                source,
-                key=self._key,
-                key_id=self._key_id,
-                user_id=str(user_id),
-                card_id=f"discord-thread:{public_thread_id}",
-                resource_id=str(resource_id),
-                author_id=str(author_id) if author_id is not None else None,
-                allow_empty_fields=self._allow_empty_fields,
-                expected_extra_sources=("pixel:lsb",) if self._lsb_enabled else (),
+            output = self._personalize_png(
+                source, user_id, public_thread_id, resource_id, author_id
             )
-            if self._lsb_enabled:
-                envelope = next(
-                    chunk.data
-                    for chunk in parse_png(output)
-                    if chunk.chunk_type == TRACE_CHUNK_TYPE
-                )
-                output = embed_lsb(output, envelope, key=self._key, repetition=3)
+        if len(output) > self.max_output_bytes:
+            raise WatermarkError(f"交付副本超过 {self.max_output_bytes} 字节。")
         return PersonalizedCard(output, f"{Path(filename).stem}.personalized{suffix}")
+
+    def _ensure_no_pixel_identity(self, source: bytes) -> None:
+        """保留原像素交付前检查已知旧身份，防止结构层与像素层冲突。"""
+        try:
+            old = verify_watermark(source, keys=self._keys)
+        except WatermarkError:
+            old = None
+        if old and "pixel:lsb" in old["payload"].get("carriers", []):
+            raise WatermarkError("源文件声明已有像素水印；无法安全降级，请使用原始源文件。")
+        try:
+            old_pixels = extract_lsb_all(
+                source, keys=list(self._keys.values()), repetition=3,
+                max_input_bytes=self.max_output_bytes,
+            )
+        except (ExtractionNotFound, LSBSkipError, LSBWatermarkError):
+            old_pixels = []
+        if old_pixels:
+            raise WatermarkError("源文件包含已有像素水印；请使用原始源文件，或开启像素层后重新签发。")
+
+    def _personalize_png(
+        self, source: bytes, user_id: int, public_thread_id: int,
+        resource_id: int, author_id: int | None,
+    ) -> bytes:
+        """使用同一签发参数生成真实载体清单，像素受限时从源图重新签发。"""
+        assert self._key is not None and self._key_id is not None
+        inject = partial(
+            inject_watermark, key=self._key, key_id=self._key_id, user_id=str(user_id),
+            card_id=f"discord-thread:{public_thread_id}", resource_id=str(resource_id),
+            author_id=str(author_id) if author_id is not None else None,
+            allow_empty_fields=self._allow_empty_fields,
+        )
+        if not self._lsb_enabled:
+            self._ensure_no_pixel_identity(source)
+            return inject(source)[0]
+        output, _ = inject(source, expected_extra_sources=("pixel:lsb",))
+        envelope = next(
+            chunk.data for chunk in parse_png(output) if chunk.chunk_type == TRACE_CHUNK_TYPE
+        )
+        try:
+            return embed_lsb(
+                output, envelope, key=self._key, repetition=3,
+                max_output_bytes=self.max_output_bytes,
+            )
+        except LSBSkipError as error:
+            # 丢弃未交付的尝试，不保留错误的像素层承诺或半转换图像。
+            self._ensure_no_pixel_identity(source)
+            logger.warning("跳过 LSB 继续交付：resource=%s reason=%s", resource_id, error.reason)
+            return inject(
+                source,
+                pixel_layer={"status": "skipped", "reason": error.reason, "detail": str(error)},
+            )[0]

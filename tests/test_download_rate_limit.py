@@ -35,6 +35,7 @@ def make_bot_interaction(*, bot=None):
         return_value="https://example.com/private-link"
     )
     interaction = make_interaction(download_service)
+    interaction.filesize_limit = 10 * 1024 * 1024
     interaction.guild = SimpleNamespace(id=400)
     interaction.channel = SimpleNamespace(id=300)
     if bot is not None:

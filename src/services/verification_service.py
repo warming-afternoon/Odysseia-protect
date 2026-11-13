@@ -25,12 +25,13 @@ from src.models import TraceVerificationJob
 from src.services.object_store import R2ObjectStore
 from src.services.traceability_service import TraceabilityService
 from src.traceability.watermark import WatermarkError
+from src.traceability.limits import DEFAULT_MAX_OUTPUT_BYTES
 
 logger = logging.getLogger(__name__)
 
 MAX_ARCHIVE_ENTRIES = 1000
 MAX_EXPANDED_BYTES = 3 * 1024 * 1024 * 1024
-MAX_MEMBER_BYTES = 25 * 1024 * 1024
+MAX_MEMBER_BYTES = DEFAULT_MAX_OUTPUT_BYTES
 MAX_COMPRESSION_RATIO = 100
 REPORT_RETENTION_DAYS = 7
 
@@ -153,6 +154,14 @@ def _render_markdown_report(report: dict) -> str:
                 lines.append(f"- 作者 Discord 用户 ID：{_inline_code(payload['author_id'])}")
         if "key_id" in record:
             lines.append(f"- 密钥版本：{_inline_code(record['key_id'])}")
+        if isinstance(payload, dict) and isinstance(payload.get("pixel_layer"), dict):
+            pixel = payload["pixel_layer"]
+            if pixel.get("status") == "skipped":
+                lines.append(
+                    "- LSB 像素层：未写入（"
+                    + str(pixel.get("detail") or pixel.get("reason") or "已知处理限制")
+                    + "）"
+                )
         if "layer_status" in record:
             layer_status = str(record["layer_status"])
             lines.append(
@@ -455,9 +464,9 @@ class VerificationService:
                     records.append({"name": name, "status": "skipped"})
                     continue
                 with archive.open(info) as member:
-                    payload = member.read(MAX_MEMBER_BYTES + 1)
-                if len(payload) > MAX_MEMBER_BYTES:
-                    raise ArchiveValidationError(f"成员超过 25 MiB：{name}")
+                    payload = member.read(self.traceability.max_output_bytes + 1)
+                if len(payload) > self.traceability.max_output_bytes:
+                    raise ArchiveValidationError(f"成员超过 {self.traceability.max_output_bytes} 字节：{name}")
                 records.append(self._verify_png(name, payload))
         return records
 
@@ -503,16 +512,17 @@ class VerificationService:
                 candidate = (root / target).resolve()
                 if root not in candidate.parents:
                     raise ArchiveValidationError("7z 解压路径逃逸。")
-                payload = candidate.read_bytes()
-                if len(payload) > MAX_MEMBER_BYTES:
-                    raise ArchiveValidationError(f"成员超过 25 MiB：{target}")
+                with candidate.open("rb") as member:
+                    payload = member.read(self.traceability.max_output_bytes + 1)
+                if len(payload) > self.traceability.max_output_bytes:
+                    raise ArchiveValidationError(f"成员超过 {self.traceability.max_output_bytes} 字节：{target}")
                 records.append(self._verify_png(target, payload))
         return records
 
-    @staticmethod
-    def _validate_sizes(name: str, size: int, compressed: int, total: int) -> None:
-        if size > MAX_MEMBER_BYTES:
-            raise ArchiveValidationError(f"成员超过 25 MiB：{name}")
+    def _validate_sizes(self, name: str, size: int, compressed: int, total: int) -> None:
+        """统一核验单文件上限，同时保留压缩包总量及压缩比限制。"""
+        if size > self.traceability.max_output_bytes:
+            raise ArchiveValidationError(f"成员超过 {self.traceability.max_output_bytes} 字节：{name}")
         if total > MAX_EXPANDED_BYTES:
             raise ArchiveValidationError("压缩包解压总量超过 3 GiB。")
         if size and compressed == 0:

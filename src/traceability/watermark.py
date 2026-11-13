@@ -555,6 +555,7 @@ def inject_watermark(
     expected_extra_sources: Iterable[str] = (),
     allow_empty_fields: bool = True,
     author_id: str | None = None,
+    pixel_layer: dict[str, str] | None = None,
 ) -> tuple[bytes, dict[str, Any]]:
     chunks = parse_png(png_data)
     documents = card_documents(chunks)
@@ -581,6 +582,9 @@ def inject_watermark(
     payload["macro_sources"] = (
         sorted({"json:" + keyword for _, keyword, _ in documents}) if field else []
     )
+    payload["pixel_layer"] = dict(pixel_layer) if pixel_layer is not None else {
+        "status": "embedded" if "pixel:lsb" in payload["carriers"] else "disabled"
+    }
     envelope = create_envelope(payload, key, key_id)
     label = secrets.token_hex(8)
     updated = {
